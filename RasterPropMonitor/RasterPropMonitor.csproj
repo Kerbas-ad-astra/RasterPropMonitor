@@ -57,11 +57,14 @@
     <Compile Include="Core\CustomVariable.cs" />
     <Compile Include="Core\MappedVariable.cs" />
     <Compile Include="Core\Protractor.cs" />
+    <Compile Include="Core\TextRenderer.cs" />
     <Compile Include="Handlers\IJSIModule.cs" />
+    <Compile Include="Handlers\JSIFAR.cs" />
     <Compile Include="Handlers\JSIGimbal.cs" />
     <Compile Include="Handlers\JSIGraphingBackground.cs" />
     <Compile Include="Handlers\JSIMechJeb.cs" />
     <Compile Include="Handlers\JSIParachute.cs" />
+    <Compile Include="Handlers\JSISASMenu.cs" />
     <Compile Include="Handlers\MechJebRPM.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Core\ButtonHandler.cs" />
@@ -174,6 +177,8 @@
   <ItemGroup>
     <EmbeddedResource Include="Shaders\RPM-DisplayShader-compiled.shader" />
     <None Include="Shaders\RPM-DisplayShader.shader" />
+    <EmbeddedResource Include="Shaders\RPM-FontShader-compiled.shader" />
+    <None Include="Shaders\RPM-FontShader.shader" />
   </ItemGroup>
   <PropertyGroup>
     <PostBuildEvent>copy $(TargetPath) $(SolutionDir)GameData\JSI\RasterPropMonitor\Plugins\</PostBuildEvent>
