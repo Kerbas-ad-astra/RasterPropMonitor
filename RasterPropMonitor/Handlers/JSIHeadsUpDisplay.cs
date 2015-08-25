@@ -14,6 +14,11 @@ namespace JSI
     class JSIHeadsUpDisplay : InternalModule
     {
         [KSPField]
+        public string cameraTransform = string.Empty;
+        private FlyingCamera cameraObject;
+        [KSPField]
+        public float hudFov = 60.0f;
+        [KSPField]
         public int drawingLayer = 17;
 
         [KSPField]
@@ -51,6 +56,10 @@ namespace JSI
         private Color progradeColorValue = new Color(0.84f, 0.98f, 0);
         [KSPField]
         public float iconPixelSize = 64f;
+        [KSPField]
+        public string headingBarProgradeTexture = string.Empty;
+        [KSPField]
+        public string ladderProgradeTexture = string.Empty;
 
         // Vertical bars
         [KSPField]
@@ -59,8 +68,6 @@ namespace JSI
 
         private GameObject cameraBody;
         private Camera hudCamera;
-
-        private RasterPropMonitorComputer comp;
 
         private GameObject ladderMesh;
         private GameObject progradeLadderIcon;
@@ -74,15 +81,25 @@ namespace JSI
         private bool startupComplete;
         private bool firstRenderComplete;
 
+        private PersistenceAccessor persistence;
 
         /// <summary>
         /// Initialize the renderable game objects for the HUD.
         /// </summary>
         /// <param name="screenWidth"></param>
         /// <param name="screenHeight"></param>
-        void InitializeRenderables(float screenWidth, float screenHeight)
+        void InitializeRenderables(RenderTexture screen)
         {
+            float screenWidth = (float)screen.width;
+            float screenHeight = (float)screen.height;
+
             Shader displayShader = JUtil.LoadInternalShader("RPM-DisplayShader");
+
+            if (!string.IsNullOrEmpty(cameraTransform))
+            {
+                cameraObject = new FlyingCamera(part, screen, hudCamera.aspect);
+                cameraObject.PointCamera(cameraTransform, hudFov);
+            }
 
             if (!string.IsNullOrEmpty(staticOverlay))
             {
@@ -127,10 +144,25 @@ namespace JSI
                     {
                         Material progradeIconMaterial = new Material(displayShader);
                         progradeIconMaterial.color = Color.white;
-                        progradeIconMaterial.mainTexture = JUtil.GetGizmoTexture();
+                        Rect texCoord;
+                        if (string.IsNullOrEmpty(ladderProgradeTexture))
+                        {
+                            progradeIconMaterial.mainTexture = JUtil.GetGizmoTexture();
+                            texCoord = GizmoIcons.GetIconLocation(GizmoIcons.IconType.PROGRADE);
+                        }
+                        else
+                        {
+                            Texture2D progradeTexture = GameDatabase.Instance.GetTexture(ladderProgradeTexture.EnforceSlashes(), false);
+                            if (progradeTexture == null)
+                            {
+                                JUtil.LogErrorMessage(this, "Failed to find ladder prograde texture \"{0}\".", ladderProgradeTexture);
+                            }
+                            progradeIconMaterial.mainTexture = progradeTexture;
+                            texCoord = new Rect(0.0f, 0.0f, 1.0f, 1.0f);
+                        }
                         progradeIconMaterial.SetVector("_Color", progradeColorValue);
 
-                        progradeLadderIcon = JUtil.CreateSimplePlane("JSIHeadsUpDisplayLadderProgradeIcon" + hudCamera.GetInstanceID(), new Vector2(iconPixelSize * 0.5f, iconPixelSize * 0.5f), GizmoIcons.GetIconLocation(GizmoIcons.IconType.PROGRADE), drawingLayer);
+                        progradeLadderIcon = JUtil.CreateSimplePlane("JSIHeadsUpDisplayLadderProgradeIcon" + hudCamera.GetInstanceID(), new Vector2(iconPixelSize * 0.5f, iconPixelSize * 0.5f), texCoord, drawingLayer);
                         progradeLadderIcon.transform.position = new Vector3(0.0f, 0.0f, 1.35f);
                         progradeLadderIcon.renderer.material = progradeIconMaterial;
                         progradeLadderIcon.transform.parent = cameraBody.transform;
@@ -160,12 +192,27 @@ namespace JSI
                     {
                         Material progradeIconMaterial = new Material(displayShader);
                         progradeIconMaterial.color = Color.white;
-                        progradeIconMaterial.mainTexture = JUtil.GetGizmoTexture();
+                        Rect texCoord;
+                        if (string.IsNullOrEmpty(headingBarProgradeTexture))
+                        {
+                            progradeIconMaterial.mainTexture = JUtil.GetGizmoTexture();
+                            texCoord = GizmoIcons.GetIconLocation(GizmoIcons.IconType.PROGRADE);
+                        }
+                        else
+                        {
+                            Texture2D progradeTexture = GameDatabase.Instance.GetTexture(headingBarProgradeTexture.EnforceSlashes(), false);
+                            if (progradeTexture == null)
+                            {
+                                JUtil.LogErrorMessage(this, "Failed to find heading bar prograde texture \"{0}\".", headingBarProgradeTexture);
+                            }
+                            progradeIconMaterial.mainTexture = progradeTexture;
+                            texCoord = new Rect(0.0f, 0.0f, 1.0f, 1.0f);
+                        }
                         progradeIconMaterial.SetVector("_Color", progradeColorValue);
 
                         progradeHeadingIconOrigin = headingBarPosition.x + 0.5f * (headingBarPosition.z - screenWidth);
 
-                        progradeHeadingIcon = JUtil.CreateSimplePlane("JSIHeadsUpDisplayHeadingProgradeIcon" + hudCamera.GetInstanceID(), new Vector2(iconPixelSize * 0.5f, iconPixelSize * 0.5f), GizmoIcons.GetIconLocation(GizmoIcons.IconType.PROGRADE), drawingLayer);
+                        progradeHeadingIcon = JUtil.CreateSimplePlane("JSIHeadsUpDisplayHeadingProgradeIcon" + hudCamera.GetInstanceID(), new Vector2(iconPixelSize * 0.5f, iconPixelSize * 0.5f), texCoord, drawingLayer);
                         progradeHeadingIcon.transform.position = new Vector3(progradeHeadingIconOrigin, 0.5f * (screenHeight - headingBarPosition.w) - headingBarPosition.y, 1.35f);
                         progradeHeadingIcon.renderer.material = progradeIconMaterial;
                         progradeHeadingIcon.transform.parent = headingMesh.transform;
@@ -202,7 +249,7 @@ namespace JSI
         /// <summary>
         /// Update the ladder's texture UVs so it's drawn correctly
         /// </summary>
-        private void UpdateLadder()
+        private void UpdateLadder(Quaternion rotationVesselSurface, RPMVesselComputer comp)
         {
             float pitch = 90.0f - Vector3.Angle(comp.Forward, comp.Up);
 
@@ -232,7 +279,6 @@ namespace JSI
                 new Vector2(0.5f + horizonTextureSize.x, ladderMidpointCoord + horizonTextureSize.y)
             };
 
-            Quaternion rotationVesselSurface = comp.RotationVesselSurface;
             float roll = rotationVesselSurface.eulerAngles.z;
 
             ladderMesh.transform.Rotate(new Vector3(0.0f, 0.0f, 1.0f), lastRoll - roll);
@@ -241,10 +287,8 @@ namespace JSI
 
             if (progradeLadderIcon != null)
             {
-                Vector3 velocityVesselSurfaceUnit = comp.VelocityVesselSurface.normalized;
-                Vector3 tmpVec = comp.Up * Vector3.Dot(comp.Up, velocityVesselSurfaceUnit) + comp.SurfaceForward * Vector3.Dot(comp.SurfaceForward, velocityVesselSurfaceUnit);
-                float AoA = Vector3.Dot(tmpVec.normalized, comp.Up);
-                AoA = Mathf.Rad2Deg * Mathf.Asin(AoA);
+                float AoA = comp.AbsoluteAoA;
+                AoA = (float)JUtil.ClampDegrees180(AoA);
                 if (float.IsNaN(AoA))
                 {
                     AoA = 0.0f;
@@ -281,9 +325,9 @@ namespace JSI
         /// <summary>
         /// Update the compass / heading bar
         /// </summary>
-        private void UpdateHeading()
+        private void UpdateHeading(Quaternion rotationVesselSurface, RPMVesselComputer comp)
         {
-            float heading = comp.RotationVesselSurface.eulerAngles.y / 360.0f;
+            float heading = rotationVesselSurface.eulerAngles.y / 360.0f;
 
             MeshFilter meshFilter = headingMesh.GetComponent<MeshFilter>();
 
@@ -297,9 +341,8 @@ namespace JSI
 
             if (progradeHeadingIcon != null)
             {
-                Vector3 velocityVesselSurfaceUnit = comp.VelocityVesselSurface.normalized;
-                float slipAngle = velocityVesselSurfaceUnit.AngleInPlane(comp.Up, comp.Forward);
-                float slipTC = JUtil.DualLerp(0f, 1f, 0f, 360f, comp.RotationVesselSurface.eulerAngles.y + slipAngle);
+                float slipAngle = comp.Sideslip;
+                float slipTC = JUtil.DualLerp(0f, 1f, 0f, 360f, rotationVesselSurface.eulerAngles.y + slipAngle);
                 float slipIconX = JUtil.DualLerp(progradeHeadingIconOrigin - 0.5f * headingBarPosition.z, progradeHeadingIconOrigin + 0.5f * headingBarPosition.z, heading - headingBarTextureWidth, heading + headingBarTextureWidth, slipTC);
 
                 Vector3 position = progradeHeadingIcon.transform.position;
@@ -322,24 +365,33 @@ namespace JSI
                 firstRenderComplete = true;
                 hudCamera.orthographicSize = (float)(screen.height) * 0.5f;
                 hudCamera.aspect = (float)screen.width / (float)screen.height;
-                InitializeRenderables((float)screen.width, (float)screen.height);
+                InitializeRenderables(screen);
             }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
 
             for (int i = 0; i < verticalBars.Count; ++i)
             {
-                verticalBars[i].Update(comp);
+                verticalBars[i].Update(comp, persistence);
             }
 
             GL.Clear(true, true, backgroundColorValue);
+
+            // Draw the camera's view, if configured.
+            if (cameraObject != null)
+            {
+                cameraObject.Render();
+            }
 
             hudCamera.targetTexture = screen;
 
             // MOARdV TODO: I don't think this does anything...
             GL.Color(Color.white);
 
+            Quaternion rotationVesselSurface = comp.RotationVesselSurface;
             if (headingMesh != null)
             {
-                UpdateHeading();
+                UpdateHeading(rotationVesselSurface, comp);
                 JUtil.ShowHide(true, headingMesh);
             }
 
@@ -354,7 +406,7 @@ namespace JSI
                 //    horizonSize.x, horizonSize.y);
                 //GL.Viewport(new Rect((screen.width - horizonSize.x) * 0.5f, (screen.height - horizonSize.y) * 0.5f, horizonSize.x, horizonSize.y));
                 // Fix up UVs, apply rotation.
-                UpdateLadder();
+                UpdateLadder(rotationVesselSurface, comp);
                 JUtil.ShowHide(true, ladderMesh);
                 //hudCamera.Render();
                 //JUtil.ShowHide(false, ladderMesh);
@@ -409,9 +461,7 @@ namespace JSI
                     progradeColorValue = ConfigNode.ParseColor32(progradeColor);
                 }
 
-                // use the RPM comp's centralized database so we're not 
-                // repeatedly doing computation.
-                comp = RasterPropMonitorComputer.Instantiate(this.part);
+                persistence = new PersistenceAccessor(internalProp);
             }
             catch (Exception e)
             {
@@ -436,6 +486,8 @@ namespace JSI
             {
                 JUtil.DisposeOfGameObjects(new GameObject[] { verticalBars[i].barObject });
             }
+
+            persistence = null;
         }
     }
 
@@ -447,6 +499,8 @@ namespace JSI
         public readonly GameObject barObject;
         private float textureSize;
         private bool useLog10;
+
+        private VariableOrNumberRange enablingVariable;
 
         internal VerticalBar(ConfigNode node, float screenWidth, float screenHeight, int drawingLayer, Shader displayShader, GameObject cameraBody)
         {
@@ -515,6 +569,17 @@ namespace JSI
 
             Vector4 position = ConfigNode.ParseVector4(node.GetValue("position"));
 
+            if (node.HasValue("enablingVariable") && node.HasValue("enablingVariableRange"))
+            {
+                string[] range = node.GetValue("enablingVariableRange").Split(',');
+                if (range.Length != 2)
+                {
+                    throw new Exception("VerticalBar " + node.GetValue("name") + " has an invalid enablingVariableRange");
+                }
+
+                enablingVariable = new VariableOrNumberRange(node.GetValue("enablingVariable").Trim(), range[0].Trim(), range[1].Trim());
+            }
+
             barObject = JUtil.CreateSimplePlane("VerticalBar" + node.GetValue("name"), new Vector2(0.5f * position.z, 0.5f * position.w), new Rect(0.0f, 0.0f, 1.0f, 1.0f), drawingLayer);
 
             Material barMaterial = new Material(displayShader);
@@ -531,10 +596,18 @@ namespace JSI
             JUtil.ShowHide(true, barObject);
         }
 
-        internal void Update(RasterPropMonitorComputer comp)
+        internal void Update(RPMVesselComputer comp, PersistenceAccessor persistence)
         {
             float value;
-            if (variable.Get(out value, comp))
+            if (enablingVariable != null)
+            {
+                if (!enablingVariable.IsInRange(comp, persistence))
+                {
+                    return;
+                }
+            }
+
+            if (variable.Get(out value, comp, persistence))
             {
                 if (useLog10)
                 {
