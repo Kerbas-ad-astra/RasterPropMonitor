@@ -1,3 +1,23 @@
+/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
 using UnityEngine;
 using System;
 using System.Collections.Generic;
@@ -12,7 +32,6 @@ namespace JSI
         private int updateCountdown;
         private readonly List<VariableAnimationSet> variableSets = new List<VariableAnimationSet>();
         private bool alwaysActive;
-        private PersistenceAccessor persistence;
 
         private bool UpdateCheck()
         {
@@ -70,17 +89,15 @@ namespace JSI
                         JUtil.LogMessage(this, "Error in building prop number {1} - {0}", e.Message, internalProp.propID);
                     }
                 }
-                if (JUtil.debugLoggingEnabled)
-                {
-                    JUtil.LogMessage(this, "Configuration complete in prop {1}, supporting {0} variable indicators.", variableSets.Count, internalProp.propID);
-                }
+
+                JUtil.LogMessage(this, "Configuration complete in prop {1}, supporting {0} variable indicators.", variableSets.Count, internalProp.propID);
+
                 foreach (VariableAnimationSet thatSet in variableSets)
                 {
                     alwaysActive |= thatSet.alwaysActive;
                 }
                 RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
                 comp.UpdateDataRefreshRate(refreshRate);
-                persistence = new PersistenceAccessor(internalProp);
                 startupComplete = true;
             }
             catch
@@ -94,7 +111,6 @@ namespace JSI
         public void OnDestroy()
         {
             //JUtil.LogMessage(this, "OnDestroy()");
-            persistence = null;
         }
 
         public void Update()
@@ -118,9 +134,10 @@ namespace JSI
             }
 
             RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            double universalTime = Planetarium.GetUniversalTime();
             for (int unit = 0; unit < variableSets.Count; ++unit)
             {
-                variableSets[unit].Update(comp, persistence);
+                variableSets[unit].Update(comp, universalTime);
             }
         }
 
@@ -136,7 +153,7 @@ namespace JSI
 
     public class VariableAnimationSet
     {
-        private readonly VariableOrNumber[] scaleEnds = new VariableOrNumber[3];
+        private readonly VariableOrNumberRange variable;
         private readonly Animation onAnim;
         private readonly Animation offAnim;
         private readonly bool thresholdMode;
@@ -162,12 +179,16 @@ namespace JSI
         private readonly string textureLayer;
         private readonly Mode mode;
         private readonly float resourceAmount;
+        private readonly string resourceName;
         private readonly bool looping;
+        private readonly float maxRateChange;
         // runtime values:
         private bool alarmActive;
         private bool currentState;
         private double lastStateChange;
+        private double lastAnimUpdate;
         private Part part;
+        private float lastScaledValue = -1.0f;
         public readonly bool alwaysActive = false;
 
         private enum Mode
@@ -182,6 +203,11 @@ namespace JSI
             TextureScale,
         }
 
+        // MOARdV TODO: If I understand the Unity docs correctly, we are leaking
+        // some things here (material .get methods make copies, for instance).
+        // I haven't seen conclusive signs of destructors working in child
+        // objects like this, so do I need a manual method?  Or make it a MonoBehavior
+        // with only the OnDestroy implemented?
         public VariableAnimationSet(ConfigNode node, InternalProp thisProp)
         {
             part = thisProp.part;
@@ -203,19 +229,20 @@ namespace JSI
                 throw new ArgumentException("Could not parse 'scale' parameter.");
             }
 
+            string variableName = string.Empty;
             if (node.HasValue("variableName"))
             {
-                string variableName;
                 variableName = node.GetValue("variableName").Trim();
-                scaleEnds[2] = new VariableOrNumber(variableName, this);
             }
             else if (node.HasValue("stateMethod"))
             {
                 RPMVesselComputer comp = RPMVesselComputer.Instance(part.vessel);
-                Func<bool> stateFunction = (Func<bool>)comp.GetMethod(node.GetValue("stateMethod").Trim(), thisProp, typeof(Func<bool>));
+                string stateMethod = node.GetValue("stateMethod").Trim();
+                // Verify the state method actually exists
+                Func<bool> stateFunction = (Func<bool>)comp.GetMethod(stateMethod, thisProp, typeof(Func<bool>));
                 if (stateFunction != null)
                 {
-                    scaleEnds[2] = new VariableOrNumber(stateFunction, this);
+                    variableName = "PLUGIN_" + stateMethod;
                 }
                 else
                 {
@@ -227,11 +254,9 @@ namespace JSI
                 throw new ArgumentException("Missing variable name.");
             }
 
-            scaleEnds[0] = new VariableOrNumber(tokens[0], this);
-            scaleEnds[1] = new VariableOrNumber(tokens[1], this);
+            variable = new VariableOrNumberRange(variableName, tokens[0], tokens[1]);
 
             // That takes care of the scale, now what to do about that scale:
-
             if (node.HasValue("reverse"))
             {
                 if (!bool.TryParse(node.GetValue("reverse"), out reverse))
@@ -312,9 +337,13 @@ namespace JSI
             else if (node.HasValue("activeColor") && node.HasValue("passiveColor") && node.HasValue("coloredObject"))
             {
                 if (node.HasValue("colorName"))
+                {
                     colorName = node.GetValue("colorName");
+                }
                 passiveColor = ConfigNode.ParseColor32(node.GetValue("passiveColor"));
                 activeColor = ConfigNode.ParseColor32(node.GetValue("activeColor"));
+                Vector4 range = (activeColor - passiveColor);
+                float maxRange = Mathf.Max(Mathf.Abs(range.x), Mathf.Abs(range.y), Mathf.Abs(range.z), Mathf.Abs(range.w));
                 colorShiftRenderer = thisProp.FindModelComponent<Renderer>(node.GetValue("coloredObject"));
                 colorShiftRenderer.material.SetColor(colorName, reverse ? activeColor : passiveColor);
                 mode = Mode.Color;
@@ -373,6 +402,20 @@ namespace JSI
                 throw new ArgumentException("Cannot initiate any of the possible action modes.");
             }
 
+            if (!(node.HasValue("maxRateChange") && float.TryParse(node.GetValue("maxRateChange"), out maxRateChange)))
+            {
+                maxRateChange = 0.0f;
+            }
+            if (maxRateChange >= 60.0f)
+            {
+                // Animation rate is too fast to even notice @60Hz
+                maxRateChange = 0.0f;
+            }
+            else
+            {
+                lastAnimUpdate = Planetarium.GetUniversalTime();
+            }
+
             if (node.HasValue("threshold"))
             {
                 threshold = ConfigNode.ParseVector2(node.GetValue("threshold"));
@@ -425,13 +468,22 @@ namespace JSI
                 if (node.HasValue("resourceAmount"))
                 {
                     resourceAmount = float.Parse(node.GetValue("resourceAmount"));
+
+                    if (node.HasValue("resourceName"))
+                    {
+                        resourceName = node.GetValue("resourceName");
+                    }
+                    else
+                    {
+                        resourceName = "ElectricCharge";
+                    }
                 }
 
-                TurnOff();
+                TurnOff(Planetarium.GetUniversalTime());
             }
         }
 
-        private void TurnOn()
+        private void TurnOn(double universalTime)
         {
             if (!currentState)
             {
@@ -479,20 +531,20 @@ namespace JSI
                 float requesting = (resourceAmount * TimeWarp.deltaTime);
                 if (requesting > 0.0f)
                 {
-                    float extracted = part.RequestResource("ElectricCharge", requesting);
+                    float extracted = part.RequestResource(resourceName, requesting);
                     if (extracted < 0.5f * requesting)
                     {
                         // Insufficient power - shut down
-                        TurnOff();
+                        TurnOff(universalTime);
                         return; // early, so we don't think it's on
                     }
                 }
             }
             currentState = true;
-            lastStateChange = Planetarium.GetUniversalTime();
+            lastStateChange = universalTime;
         }
 
-        private void TurnOff()
+        private void TurnOff(double universalTime)
         {
             if (currentState)
             {
@@ -543,41 +595,89 @@ namespace JSI
                 }
             }
             currentState = false;
-            lastStateChange = Planetarium.GetUniversalTime();
+            lastStateChange = universalTime;
         }
 
-        public void Update(RPMVesselComputer comp, PersistenceAccessor persistence)
+        public void Update(RPMVesselComputer comp, double universalTime)
         {
-            var scaleResults = new float[3];
-            for (int i = 0; i < 3; i++)
+            float scaledValue;
+            if (!variable.InverseLerp(comp, out scaledValue))
             {
-                if (!scaleEnds[i].Get(out scaleResults[i], comp, persistence))
+                return;
+            }
+
+            float delta = Mathf.Abs(scaledValue - lastScaledValue);
+            if (delta < float.Epsilon)
+            {
+                if (thresholdMode && flashingDelay > 0.0 && scaledValue >= threshold.x && scaledValue <= threshold.y)
                 {
-                    return;
+                    // If we're blinking our lights, they need to keep blinking
+                    if (lastStateChange < universalTime - flashingDelay)
+                    {
+                        if (currentState)
+                        {
+                            TurnOff(universalTime);
+                        }
+                        else
+                        {
+                            TurnOn(universalTime);
+                        }
+                    }
+
+                    if (alarmActive && audioOutput != null)
+                    {
+                        audioOutput.audio.volume = alarmSoundVolume * GameSettings.SHIP_VOLUME;
+                    }
+                }
+
+                if (maxRateChange > 0.0f)
+                {
+                    lastAnimUpdate = universalTime;
+                }
+                return;
+            }
+
+            if (maxRateChange > 0.0f && lastScaledValue >= 0.0f)
+            {
+                float maxDelta = (float)(universalTime - lastAnimUpdate) * maxRateChange;
+
+                if (Mathf.Abs(lastScaledValue - scaledValue) > maxDelta)
+                {
+                    if (scaledValue < lastScaledValue)
+                    {
+                        scaledValue = lastScaledValue - maxDelta;
+                    }
+                    else
+                    {
+                        scaledValue = lastScaledValue + maxDelta;
+                    }
                 }
             }
-            float scaledValue = Mathf.InverseLerp(scaleResults[0], scaleResults[1], scaleResults[2]);
+
+            lastScaledValue = scaledValue;
+            lastAnimUpdate = universalTime;
+
             if (thresholdMode)
             {
                 if (scaledValue >= threshold.x && scaledValue <= threshold.y)
                 {
                     if (flashingDelay > 0)
                     {
-                        if (lastStateChange < Planetarium.GetUniversalTime() - flashingDelay)
+                        if (lastStateChange < universalTime - flashingDelay)
                         {
                             if (currentState)
                             {
-                                TurnOff();
+                                TurnOff(universalTime);
                             }
                             else
                             {
-                                TurnOn();
+                                TurnOn(universalTime);
                             }
                         }
                     }
                     else
                     {
-                        TurnOn();
+                        TurnOn(universalTime);
                     }
                     if (audioOutput != null && !alarmActive)
                     {
@@ -587,7 +687,7 @@ namespace JSI
                 }
                 else
                 {
-                    TurnOff();
+                    TurnOff(universalTime);
                     if (audioOutput != null && alarmActive)
                     {
                         if (!alarmMustPlayOnce)
@@ -638,11 +738,7 @@ namespace JSI
                     case Mode.LoopingAnimation:
                     // MOARdV TODO: Define what this actually does
                     case Mode.Animation:
-                        float lerp = JUtil.DualLerp(reverse ? 1f : 0f, reverse ? 0f : 1f, scaleResults[0], scaleResults[1], scaleResults[2]);
-                        if (float.IsNaN(lerp) || float.IsInfinity(lerp))
-                        {
-                            lerp = reverse ? 1f : 0f;
-                        }
+                        float lerp = (reverse) ? (1.0f - scaledValue) : scaledValue;
                         onAnim[animationName].normalizedTime = lerp;
                         break;
                 }

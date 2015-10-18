@@ -1,4 +1,24 @@
-﻿using System;
+﻿/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Linq;
@@ -14,70 +34,72 @@ namespace JSI
     {
         #region Reflection Definitions
         // MechJebCore
-        private readonly Type mjMechJebCore_t;
+        private static readonly Type mjMechJebCore_t;
         // MechJebCore.GetComputerModule(string)
-        private readonly MethodInfo mjGetComputerModule;
+        private static readonly DynamicMethodDelegate getComputerModule;
         // MechJebCore.target
-        private readonly FieldInfo mjCoreTarget;
+        private static readonly FieldInfo mjCoreTarget;
         // MechJebCore.node
-        private readonly FieldInfo mjCoreNode;
+        private static readonly FieldInfo mjCoreNode;
         // MechJebCore.attitude
-        private readonly FieldInfo mjCoreAttitude;
+        private static readonly FieldInfo mjCoreAttitude;
         // MechJebCore.vesselState
-        private readonly FieldInfo mjCoreVesselState;
+        private static readonly FieldInfo mjCoreVesselState;
 
         // AbsoluteVector
         // AbsoluteVector.latitude
-        private readonly FieldInfo mjAbsoluteVectorLat;
+        private static readonly FieldInfo mjAbsoluteVectorLat;
         // AbsoluteVector.longitude
-        private readonly FieldInfo mjAbsoluteVectorLon;
+        private static readonly FieldInfo mjAbsoluteVectorLon;
         // AbsoluteVector.(double)
-        private readonly MethodInfo mjAbsoluteVectorToDouble;
+        private static readonly DynamicMethodDelegate absoluteVectorToDouble;
 
         // MechJebModuleLandingPredictions
         // MechJebModuleLandingPredictions.GetResult()
-        private readonly MethodInfo mjPredictionsGetResult;
+        private static readonly DynamicMethodDelegate getPredictionsResult;
 
         // ReentrySimulation.Result
         // ReentrySimulation.Result.outcome
-        private readonly FieldInfo mjReentryOutcome;
+        private static readonly FieldInfo mjReentryOutcome;
         // ReentrySimulation.Result.endPosition
-        private readonly FieldInfo mjReentryEndPosition;
+        private static readonly FieldInfo mjReentryEndPosition;
+        // ReentrySimulation.Result.endUT
+        private static readonly FieldInfo mjReentryTime;
 
         // ComputerModule
         // ComputerModule.enabled (get)
-        private readonly MethodInfo mjModuleEnabled;
-        private readonly FieldInfo mjModuleUsers;
+        private static readonly DynamicFuncBool moduleEnabled;
+        private static readonly FieldInfo mjModuleUsers;
 
         // MechJebModuleStageStats
         // MechJebModuleStageStats.RequestUpdate()
-        private readonly MethodInfo mjRequestUpdate;
+        private static readonly DynamicMethodDelegate requestUpdate;
         // MechJebModuleStageStats.vacStats[]
-        private readonly FieldInfo mjVacStageStats;
+        private static readonly FieldInfo mjVacStageStats;
         // MechJebModuleStageStats.atmoStats[]
-        private readonly FieldInfo mjAtmStageStats;
+        private static readonly FieldInfo mjAtmStageStats;
 
         // MechJebModuleTargetController
         // MechJebModuleTargetController.targetLatitude
-        private readonly FieldInfo mjTargetLongitude;
+        private static readonly FieldInfo mjTargetLongitude;
         // MechJebModuleTargetController.targetLatitude
-        private readonly FieldInfo mjTargetLatitude;
+        private static readonly FieldInfo mjTargetLatitude;
         // MechJebModuleTargetController.PositionTargetExists (get)
-        private readonly MethodInfo mjGetPositionTargetExists;
+        private static readonly DynamicFuncBool getPositionTargetExists;
         // MechJebModuleTargetController.NormalTargetExists (get)
-        private readonly MethodInfo mjGetNormalTargetExists;
+        private static readonly DynamicFuncBool getNormalTargetExists;
         // TargetOrbit (get)
-        private readonly MethodInfo mjGetTargetOrbit;
+        private static readonly DynamicFuncObject getTargetOrbit;
 
         // MechJebModuleSmartASS
         // MechJebModuleSmartASS.target
-        private readonly FieldInfo mjSmartassTarget;
+        private static readonly FieldInfo mjSmartassTarget;
         // MechJebModuleSmartASS.Engage
-        private readonly MethodInfo mjSmartassEngage;
+        private static readonly DynamicMethodDelegate engageSmartass;
         // MechJebModuleSmartASS.forceRol
-        private readonly FieldInfo mjSmartassForceRol;
+        private static readonly FieldInfo mjSmartassForceRol;
         // MechJebModuleSmartASS.rol
-        private readonly FieldInfo mjSmartassRol;
+        private static readonly FieldInfo mjSmartassRol;
         // MechJebModuleSmartASS.ModeTexts
         public static string[] ModeTexts;
         // MechJebModuleSmartASS.TargetTexts
@@ -85,56 +107,84 @@ namespace JSI
 
         // MechJebModuleNodeExecutor
         // MechJebModuleNodeExecutor.ExecuteOneNode(obj controller)
-        private readonly MethodInfo mjExecuteOneNode;
+        private static readonly DynamicMethodDelegate executeOneNode;
         // MechJebModuleNodeExecutor.Abort()
-        private readonly MethodInfo mjAbortNode;
+        private static readonly DynamicAction abortNode;
 
         // FuelFlowSimulation.StageStats
         // FuelFlowSimulation.StageStats.deltaV
-        private readonly FieldInfo mjStageDv;
+        private static readonly FieldInfo mjStageDv;
         // FuelFlowSimulation.StageStats[].Length
-        private readonly MethodInfo mjStageStatsGetLength;
+        private static readonly DynamicFuncInt stageStatsGetLength;
         // FuelFlowSimulation.StageStats[].Get
-        private readonly MethodInfo mjStageStatsGetIndex;
+        private static readonly DynamicMethodDelegate stageStatsGetIndex;
 
         // UserPool
         // UserPool.Add
-        private readonly MethodInfo mjAddUser;
+        private static readonly DynamicMethodDelegate addUser;
         // UserPool.Remove
-        private readonly MethodInfo mjRemoveUser;
+        private static readonly DynamicMethodDelegate removeUser;
         // UserPool.Contains
-        private readonly MethodInfo mjContainsUser;
+        private static readonly DynamicMethodDelegate containsUser;
 
         // VesselState
         // VesselState.TerminalVelocity
-        private readonly MethodInfo mjTerminalVelocity;
+        private static readonly DynamicFuncDouble terminalVelocity;
 
         // MechJebModuleLandingAutopilot
         // MechJebModuleLandingAutopilot.LandAtPositionTarget
-        private readonly MethodInfo mjLandAtPositionTarget;
+        private static readonly DynamicMethodDelegate landAtPositionTarget;
         // MechJebModuleLandingAutopilot.LandUntargeted
-        private readonly MethodInfo mjLandUntargeted;
+        private static readonly DynamicMethodDelegate landUntargeted;
         // MechJebModuleLandingAutopilot.StopLanding
-        private readonly MethodInfo mjStopLanding;
+        private static readonly DynamicAction stopLanding;
+
+        // Spaceplane autopilot
+        private static readonly DynamicMethodDelegate spaceplaneAutoland;
+        private static readonly DynamicMethodDelegate spaceplaneHoldHeading;
+        private static readonly DynamicAction spaceplaneAPOff;
+        private static readonly FieldInfo spaceplaneAPMode;
+        private static readonly FieldInfo spaceplaneAltitude;
+        private static readonly FieldInfo spaceplaneHeading;
+        private static readonly FieldInfo spaceplaneGlideslope;
+
+        // Ascent Autopilot
+        private static readonly FieldInfo launchOrbitAltitude;
+
+        // EditableDoubleMult
+        private static readonly DynamicMethodDelegate setEditableDoubleMult;
+        private static readonly DynamicFuncDouble getEditableDoubleMult;
+        private static readonly FieldInfo getEditableDoubleMultMultiplier;
 
         // EditableDouble
-        // EditableDouble.val (get)
-        private readonly MethodInfo mjSetEditableDouble;
         // EditableDouble.val (set)
-        private readonly MethodInfo mjGetEditableDouble;
+        private static readonly DynamicMethodDelegate setEditableDouble;
+        // EditableDouble.val (get)
+        private static readonly DynamicFuncDouble getEditableDouble;
 
         // VesselExtensions.GetMasterMechJeb()
-        private readonly MethodInfo mjGetMasterMechJeb;
+        private static readonly DynamicMethodDelegate getMasterMechJeb;
         // VesselExtensions.PlaceManeuverNode()
-        private readonly MethodInfo mjPlaceManeuverNode;
+        private static readonly DynamicMethodDelegate placeManeuverNode;
 
         // OrbitalManeuverCalculator
         // OrbitalManeuverCalculator.mjDeltaVAndTimeForHohmannTransfer
-        private readonly MethodInfo mjDeltaVAndTimeForHohmannTransfer;
+        private static readonly MethodInfo mjDeltaVAndTimeForHohmannTransfer;
+        // MOARdV TODO: There appears to be extra instructions needed to handle out parameters
+        //private static readonly DynamicMethodDelegate deltaVAndTimeForHohmannTransfer;
         // OrbitalManeuverCalculator.DeltaVAndTimeForInterplanetaryTransferEjection
-        private readonly MethodInfo mjDeltaVAndTimeForInterplanetaryTransferEjection;
+        private static readonly MethodInfo mjDeltaVAndTimeForInterplanetaryTransferEjection;
+        //private static readonly DynamicMethodDelegate deltaVAndTimeForInterplanetaryTransferEjection;
         // OrbitalManeuverCalculator.DeltaVToCircularize
-        private readonly MethodInfo mjDeltaVToCircularize;
+        private static readonly DynamicMethodDelegate deltaVToCircularize;
+        // OrbitalManeuverCalculator.DeltaVToChangeApoapsis
+        private static readonly DynamicMethodDelegate deltaVToChangeApoapsis;
+        // OrbitalManeuverCalculator.DeltaVToChangePeriapsis
+        private static readonly DynamicMethodDelegate deltaVToChangePeriapsis;
+
+        // Ascent Autopilot Engaged (starting MJ dev 514)
+        private static readonly DynamicFuncBool getAscentAutopilotEngaged;
+        private static readonly DynamicMethodDelegate setAscentAutopilotEngaged;
         #endregion
 
         #region MechJeb enum imports
@@ -174,6 +224,13 @@ namespace JSI
             VERTICAL_PLUS = 22,
         }
 
+        public enum SpaceplaneMode
+        {
+            AUTOLAND = 0,
+            HOLD = 1,
+            OFF = 2,
+        }
+
         // Imported directly from MJ
         public static readonly Mode[] Target2Mode = new Mode[] { Mode.ORBITAL, Mode.ORBITAL, Mode.ORBITAL, Mode.SURFACE, Mode.ORBITAL, Mode.ORBITAL, Mode.ORBITAL, Mode.ORBITAL, Mode.ORBITAL, Mode.ORBITAL, Mode.TARGET, Mode.TARGET, Mode.TARGET, Mode.TARGET, Mode.TARGET, Mode.TARGET, Mode.ADVANCED, Mode.AUTO, Mode.SURFACE, Mode.SURFACE, Mode.SURFACE, Mode.SURFACE, Mode.SURFACE };
 
@@ -191,18 +248,15 @@ namespace JSI
             CLOSEST_APPROACH = 9,
         }
         #endregion
-        
-        private readonly bool mjFound;
 
-        private bool landingCurrent, deltaVCurrent;
+        static private readonly bool mjFound;
+
         private double deltaV, deltaVStage;
 
-        private double landingLat, landingLon, landingAlt, landingErr = -1.0;
+        private double lastUpdate = 0.0;
+        private double landingLat, landingLon, landingAlt, landingErr = -1.0, landingTime = -1.0;
 
-        private object activeJeb = null;
-
-        public JSIMechJeb(Vessel _vessel)
-            : base(_vessel)
+        static JSIMechJeb()
         {
             try
             {
@@ -211,10 +265,8 @@ namespace JSI
                 if (loadedMechJebAssy == null)
                 {
                     mjFound = false;
-                    if (JUtil.debugLoggingEnabled)
-                    {
-                        JUtil.LogMessage(this, "A supported version of MechJeb is {0}", (mjFound) ? "present" : "not available");
-                    }
+                    //JUtil.LogMessage(this, "A supported version of MechJeb is {0}", (mjFound) ? "present" : "not available");
+
                     return;
                 }
 
@@ -224,18 +276,14 @@ namespace JSI
                     .SingleOrDefault(t => t.FullName == "MuMech.MechJebCore");
                 if (mjMechJebCore_t == null)
                 {
-                    mjFound = false;
-                    if (JUtil.debugLoggingEnabled)
-                    {
-                        JUtil.LogMessage(this, "A supported version of MechJeb is {0}", (mjFound) ? "present" : "not available");
-                    }
                     return;
                 }
-                mjGetComputerModule = mjMechJebCore_t.GetMethod("GetComputerModule", new Type[] { typeof(string) });
+                MethodInfo mjGetComputerModule = mjMechJebCore_t.GetMethod("GetComputerModule", new Type[] { typeof(string) });
                 if (mjGetComputerModule == null)
                 {
                     throw new NotImplementedException("mjGetComputerModule");
                 }
+                getComputerModule = DynamicMethodDelegateFactory.Create(mjGetComputerModule);
                 mjCoreTarget = mjMechJebCore_t.GetField("target", BindingFlags.Instance | BindingFlags.Public);
                 if (mjCoreTarget == null)
                 {
@@ -257,23 +305,25 @@ namespace JSI
                     throw new NotImplementedException("mjCoreVesselState");
                 }
 
-                // VesselExtensions
+                // VesselExtensions 
                 Type mjVesselExtensions_t = loadedMechJebAssy.assembly.GetExportedTypes()
                     .SingleOrDefault(t => t.FullName == "MuMech.VesselExtensions");
                 if (mjVesselExtensions_t == null)
                 {
                     throw new NotImplementedException("mjVesselExtensions_t");
                 }
-                mjGetMasterMechJeb = mjVesselExtensions_t.GetMethod("GetMasterMechJeb", BindingFlags.Static | BindingFlags.Public);
+                MethodInfo mjGetMasterMechJeb = mjVesselExtensions_t.GetMethod("GetMasterMechJeb", BindingFlags.Static | BindingFlags.Public);
                 if (mjGetMasterMechJeb == null)
                 {
                     throw new NotImplementedException("mjGetMasterMechJeb");
                 }
-                mjPlaceManeuverNode = mjVesselExtensions_t.GetMethod("PlaceManeuverNode", BindingFlags.Static | BindingFlags.Public);
+                getMasterMechJeb = DynamicMethodDelegateFactory.Create(mjGetMasterMechJeb);
+                MethodInfo mjPlaceManeuverNode = mjVesselExtensions_t.GetMethod("PlaceManeuverNode", BindingFlags.Static | BindingFlags.Public);
                 if (mjPlaceManeuverNode == null)
                 {
                     throw new NotImplementedException("mjPlaceManeuverNode");
                 }
+                placeManeuverNode = DynamicMethodDelegateFactory.Create(mjPlaceManeuverNode);
 
                 // VesselState
                 Type mjVesselState_t = loadedMechJebAssy.assembly.GetExportedTypes()
@@ -282,23 +332,234 @@ namespace JSI
                 {
                     throw new NotImplementedException("mjVesselState_t");
                 }
-                mjTerminalVelocity = mjVesselState_t.GetMethod("TerminalVelocity", BindingFlags.Instance | BindingFlags.Public);
+                MethodInfo mjTerminalVelocity = mjVesselState_t.GetMethod("TerminalVelocity", BindingFlags.Instance | BindingFlags.Public);
                 if (mjTerminalVelocity == null)
                 {
                     throw new NotImplementedException("mjTerminalVelocity");
                 }
+                terminalVelocity = DynamicMethodDelegateFactory.CreateFuncDouble(mjTerminalVelocity);
 
-                // MechJebModuleLandingPredictions
+                // SmartASS
+                Type mjSmartass_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleSmartASS");
+                mjSmartassTarget = mjSmartass_t.GetField("target", BindingFlags.Instance | BindingFlags.Public);
+                if (mjSmartassTarget == null)
+                {
+                    throw new NotImplementedException("mjSmartassTarget");
+                }
+                MethodInfo mjSmartassEngage = mjSmartass_t.GetMethod("Engage", BindingFlags.Instance | BindingFlags.Public);
+                if (mjSmartassEngage == null)
+                {
+                    throw new NotImplementedException("mjSmartassEngage");
+                }
+                engageSmartass = DynamicMethodDelegateFactory.Create(mjSmartassEngage);
+                mjSmartassForceRol = mjSmartass_t.GetField("forceRol", BindingFlags.Instance | BindingFlags.Public);
+                if (mjSmartassForceRol == null)
+                {
+                    throw new NotImplementedException("mjSmartassForceRol");
+                }
+                mjSmartassRol = mjSmartass_t.GetField("rol", BindingFlags.Instance | BindingFlags.Public);
+                if (mjSmartassRol == null)
+                {
+                    throw new NotImplementedException("mjSmartassRol");
+                }
+                FieldInfo TargetTextsInfo = mjSmartass_t.GetField("TargetTexts", BindingFlags.Static | BindingFlags.Public);
+                TargetTexts = (string[])TargetTextsInfo.GetValue(null);
+                if (TargetTexts == null)
+                {
+                    throw new NotImplementedException("TargetTexts");
+                }
+                FieldInfo ModeTextsInfo = mjSmartass_t.GetField("ModeTexts", BindingFlags.Static | BindingFlags.Public);
+                ModeTexts = (string[])ModeTextsInfo.GetValue(null);
+                if (ModeTexts == null)
+                {
+                    throw new NotImplementedException("ModeTexts");
+                }
+
+                // Landing Predictions
                 Type mjModuleLandingPredictions_t = loadedMechJebAssy.assembly.GetExportedTypes()
                     .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleLandingPredictions");
                 if (mjModuleLandingPredictions_t == null)
                 {
                     throw new NotImplementedException("mjModuleLandingPredictions_t");
                 }
-                mjPredictionsGetResult = mjModuleLandingPredictions_t.GetMethod("GetResult", BindingFlags.Instance | BindingFlags.Public);
+                MethodInfo mjPredictionsGetResult = mjModuleLandingPredictions_t.GetMethod("GetResult", BindingFlags.Instance | BindingFlags.Public);
                 if (mjPredictionsGetResult == null)
                 {
                     throw new NotImplementedException("mjPredictionsGetResult");
+                }
+                getPredictionsResult = DynamicMethodDelegateFactory.Create(mjPredictionsGetResult);
+
+                // AbsoluteVector
+                Type mjAbsoluteVector_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.AbsoluteVector");
+                if (mjAbsoluteVector_t == null)
+                {
+                    throw new NotImplementedException("mjAbsoluteVector_t");
+                }
+                mjAbsoluteVectorLat = mjAbsoluteVector_t.GetField("latitude", BindingFlags.Instance | BindingFlags.Public);
+                if (mjAbsoluteVectorLat == null)
+                {
+                    throw new NotImplementedException("mjAbsoluteVectorLat");
+                }
+                mjAbsoluteVectorLon = mjAbsoluteVector_t.GetField("longitude", BindingFlags.Instance | BindingFlags.Public);
+                if (mjAbsoluteVectorLon == null)
+                {
+                    throw new NotImplementedException("mjAbsoluteVectorLon");
+                }
+
+                // MechJebModuleAscentAutopilot
+                Type mjMechJebModuleAscentAutopilot_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleAscentAutopilot");
+                if (mjMechJebModuleAscentAutopilot_t == null)
+                {
+                    throw new NotImplementedException("mjMechJebModuleAscentAutopilot_t");
+                }
+                launchOrbitAltitude = mjMechJebModuleAscentAutopilot_t.GetField("desiredOrbitAltitude");
+                if (launchOrbitAltitude == null)
+                {
+                    throw new NotImplementedException("launchOrbitAltitude");
+                }
+                // MOARdV TODO: when the next version of MJ is out, this will be the only way to engage
+                // the AP, so we will want to throw an exception if aapEngaged is null.
+                PropertyInfo aapEngaged = mjMechJebModuleAscentAutopilot_t.GetProperty("Engaged");
+                if(aapEngaged != null)
+                {
+                    MethodInfo getter = aapEngaged.GetGetMethod();
+                    getAscentAutopilotEngaged = DynamicMethodDelegateFactory.CreateFuncBool(getter);
+                    if (getAscentAutopilotEngaged == null)
+                    {
+                        throw new NotImplementedException("getAscentAutopilotEngaged");
+                    }
+
+                    MethodInfo setter = aapEngaged.GetSetMethod();
+                    setAscentAutopilotEngaged = DynamicMethodDelegateFactory.Create(setter);
+                    if (setAscentAutopilotEngaged == null)
+                    {
+                        throw new NotImplementedException("setAscentAutopilotEngaged");
+                    }
+                }
+
+                Type mjEditableDoubleMult_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.EditableDoubleMult");
+                if (mjEditableDoubleMult_t == null)
+                {
+                    throw new NotImplementedException("mjEditableDoubleMult_t");
+                }
+                getEditableDoubleMultMultiplier = mjEditableDoubleMult_t.GetField("multiplier");
+                if (getEditableDoubleMultMultiplier == null)
+                {
+                    throw new NotImplementedException("getEditableDoubleMultMultiplier");
+                }
+                PropertyInfo edmVal = mjEditableDoubleMult_t.GetProperty("val");
+                if (edmVal == null)
+                {
+                    throw new NotImplementedException("edmVal");
+                }
+                // getEditableDoubleMult
+                MethodInfo mjGetEDM = edmVal.GetGetMethod();
+                if (mjGetEDM != null)
+                {
+                    getEditableDoubleMult = DynamicMethodDelegateFactory.CreateFuncDouble(mjGetEDM);
+                }
+                // setEditableDoubleMult
+                MethodInfo mjSetEDM = edmVal.GetSetMethod();
+                if (mjSetEDM != null)
+                {
+                    setEditableDoubleMult = DynamicMethodDelegateFactory.Create(mjSetEDM);
+                }
+
+                // EditableAngle
+                Type mjEditableAngle_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.EditableAngle");
+                if (mjEditableAngle_t == null)
+                {
+                    throw new NotImplementedException("mjEditableAngle_t");
+                }
+                MethodInfo mjAbsoluteVectorToDouble = null;
+                foreach (MethodInfo method in mjEditableAngle_t.GetMethods(BindingFlags.Static | BindingFlags.Public))
+                {
+                    // The method name reports as "op_Implicit", but there are two
+                    if (method.ReturnType == typeof(System.Double))
+                    {
+                        mjAbsoluteVectorToDouble = method;
+                        break;
+                    }
+                }
+                if (mjAbsoluteVectorToDouble == null)
+                {
+                    throw new NotImplementedException("mjAbsoluteVectorToDouble");
+                }
+                absoluteVectorToDouble = DynamicMethodDelegateFactory.Create(mjAbsoluteVectorToDouble);
+
+                // MechJebModuleTargetController
+                Type mjModuleTargetController_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleTargetController");
+                if (mjModuleTargetController_t == null)
+                {
+                    throw new NotImplementedException("mjModuleTargetController_t");
+                }
+                mjTargetLongitude = mjModuleTargetController_t.GetField("targetLongitude", BindingFlags.Instance | BindingFlags.Public);
+                if (mjTargetLongitude == null)
+                {
+                    throw new NotImplementedException("mjTargetLongitude");
+                }
+                mjTargetLatitude = mjModuleTargetController_t.GetField("targetLatitude", BindingFlags.Instance | BindingFlags.Public);
+                if (mjTargetLatitude == null)
+                {
+                    throw new NotImplementedException("mjTargetLatitude");
+                }
+                PropertyInfo mjPositionTargetExists = mjModuleTargetController_t.GetProperty("PositionTargetExists", BindingFlags.Instance | BindingFlags.Public);
+                MethodInfo mjGetPositionTargetExists = null;
+                if (mjPositionTargetExists != null)
+                {
+                    mjGetPositionTargetExists = mjPositionTargetExists.GetGetMethod();
+                }
+                if (mjGetPositionTargetExists == null)
+                {
+                    throw new NotImplementedException("mjGetPositionTargetExists");
+                }
+                getPositionTargetExists = DynamicMethodDelegateFactory.CreateFuncBool(mjGetPositionTargetExists);
+                PropertyInfo mjNormalTargetExists = mjModuleTargetController_t.GetProperty("NormalTargetExists", BindingFlags.Instance | BindingFlags.Public);
+                MethodInfo mjGetNormalTargetExists = null;
+                if (mjNormalTargetExists != null)
+                {
+                    mjGetNormalTargetExists = mjNormalTargetExists.GetGetMethod();
+                }
+                if (mjGetNormalTargetExists == null)
+                {
+                    throw new NotImplementedException("mjGetNormalTargetExists");
+                }
+                getNormalTargetExists = DynamicMethodDelegateFactory.CreateFuncBool(mjGetNormalTargetExists);
+                PropertyInfo mjTargetOrbit = mjModuleTargetController_t.GetProperty("TargetOrbit", BindingFlags.Instance | BindingFlags.Public); ;
+                MethodInfo mjGetTargetOrbit = null;
+                if (mjTargetOrbit != null)
+                {
+                    mjGetTargetOrbit = mjTargetOrbit.GetGetMethod();
+                }
+                if (mjGetTargetOrbit == null)
+                {
+                    throw new NotImplementedException("mjGetTargetOrbit");
+                }
+                getTargetOrbit = DynamicMethodDelegateFactory.CreateFuncObject(mjGetTargetOrbit);
+
+                // MuMech.FuelFlowSimulation
+                Type mjFuelFlowSimulation_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.FuelFlowSimulation");
+                if (mjFuelFlowSimulation_t == null)
+                {
+                    throw new NotImplementedException("mjFuelFlowSimulation_t");
+                }
+                // MuMech.FuelFlowSimulation.Stats
+                Type mjFuelFlowSimulationStats_t = mjFuelFlowSimulation_t.GetNestedType("Stats");
+                if (mjFuelFlowSimulationStats_t == null)
+                {
+                    throw new NotImplementedException("mjFuelFlowSimulationStats_t");
+                }
+                mjStageDv = mjFuelFlowSimulationStats_t.GetField("deltaV", BindingFlags.Instance | BindingFlags.Public);
+                if (mjStageDv == null)
+                {
+                    throw new NotImplementedException("mjStageDv");
                 }
 
                 // MuMech.ReentrySimulation.Result
@@ -323,6 +584,151 @@ namespace JSI
                 {
                     throw new NotImplementedException("mjReentryEndPosition");
                 }
+                mjReentryTime = mjReentryResult_t.GetField("endUT", BindingFlags.Instance | BindingFlags.Public);
+                if (mjReentryTime == null)
+                {
+                    throw new NotImplementedException("mjReentryTime");
+                }
+
+                // UserPool
+                Type mjUserPool_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.UserPool");
+                MethodInfo mjAddUser = mjUserPool_t.GetMethod("Add", BindingFlags.Instance | BindingFlags.Public);
+                if (mjAddUser == null)
+                {
+                    throw new NotImplementedException("mjAddUser");
+                }
+                addUser = DynamicMethodDelegateFactory.Create(mjAddUser);
+                MethodInfo mjRemoveUser = mjUserPool_t.GetMethod("Remove", BindingFlags.Instance | BindingFlags.Public);
+                if (mjRemoveUser == null)
+                {
+                    throw new NotImplementedException("mjRemoveUser");
+                }
+                removeUser = DynamicMethodDelegateFactory.Create(mjRemoveUser);
+                MethodInfo mjContainsUser = mjUserPool_t.GetMethod("Contains", BindingFlags.Instance | BindingFlags.Public);
+                if (mjContainsUser == null)
+                {
+                    throw new NotImplementedException("mjContainsUser");
+                }
+                containsUser = DynamicMethodDelegateFactory.Create(mjContainsUser);
+
+                // MechJebModuleLandingAutopilot
+                Type mjLandingAutopilot_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleLandingAutopilot");
+                MethodInfo mjLandAtPositionTarget = mjLandingAutopilot_t.GetMethod("LandAtPositionTarget", BindingFlags.Instance | BindingFlags.Public);
+                if (mjLandAtPositionTarget == null)
+                {
+                    throw new NotImplementedException("mjLandAtPositionTarget");
+                }
+                landAtPositionTarget = DynamicMethodDelegateFactory.Create(mjLandAtPositionTarget);
+                MethodInfo mjLandUntargeted = mjLandingAutopilot_t.GetMethod("LandUntargeted", BindingFlags.Instance | BindingFlags.Public);
+                if (mjLandUntargeted == null)
+                {
+                    throw new NotImplementedException("mjLandUntargeted");
+                }
+                landUntargeted = DynamicMethodDelegateFactory.Create(mjLandUntargeted);
+                MethodInfo mjStopLanding = mjLandingAutopilot_t.GetMethod("StopLanding", BindingFlags.Instance | BindingFlags.Public);
+                if (mjStopLanding == null)
+                {
+                    throw new NotImplementedException("mjStopLanding");
+                }
+                stopLanding = DynamicMethodDelegateFactory.CreateAction(mjStopLanding);
+
+                Type mjSpaceplaneAutopilot_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleSpaceplaneAutopilot");
+                MethodInfo mjSPAutoland = mjSpaceplaneAutopilot_t.GetMethod("Autoland", BindingFlags.Instance | BindingFlags.Public);
+                if (mjSPAutoland == null)
+                {
+                    throw new NotImplementedException("mjSPAutoland");
+                }
+                spaceplaneAutoland = DynamicMethodDelegateFactory.Create(mjSPAutoland);
+                MethodInfo mjSPHoldHeadingAndAltitude = mjSpaceplaneAutopilot_t.GetMethod("HoldHeadingAndAltitude", BindingFlags.Instance | BindingFlags.Public);
+                if (mjSPHoldHeadingAndAltitude == null)
+                {
+                    throw new NotImplementedException("mjSPHoldHeadingAndAltitude");
+                }
+                spaceplaneHoldHeading = DynamicMethodDelegateFactory.Create(mjSPHoldHeadingAndAltitude);
+                MethodInfo mjSPAutopilotOff = mjSpaceplaneAutopilot_t.GetMethod("AutopilotOff", BindingFlags.Instance | BindingFlags.Public);
+                if (mjSPAutopilotOff == null)
+                {
+                    throw new NotImplementedException("mjSPAutopilotOff");
+                }
+                spaceplaneAPOff = DynamicMethodDelegateFactory.CreateAction(mjSPAutopilotOff);
+                spaceplaneAPMode = mjSpaceplaneAutopilot_t.GetField("mode", BindingFlags.Instance | BindingFlags.Public);
+                if (spaceplaneAPMode == null)
+                {
+                    throw new NotImplementedException("spaceplaneAPMode");
+                }
+                spaceplaneAltitude = mjSpaceplaneAutopilot_t.GetField("targetAltitude", BindingFlags.Instance | BindingFlags.Public);
+                if (spaceplaneAltitude == null)
+                {
+                    throw new NotImplementedException("spaceplaneAltitude");
+                }
+                spaceplaneHeading = mjSpaceplaneAutopilot_t.GetField("targetHeading", BindingFlags.Instance | BindingFlags.Public);
+                if (spaceplaneHeading == null)
+                {
+                    throw new NotImplementedException("spaceplaneHeading");
+                }
+                spaceplaneGlideslope = mjSpaceplaneAutopilot_t.GetField("glideslope", BindingFlags.Instance | BindingFlags.Public);
+                if (spaceplaneGlideslope == null)
+                {
+                    throw new NotImplementedException("spaceplaneGlideslope");
+                }
+
+                // EditableDouble
+                Type mjEditableDouble_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.EditableDouble");
+                PropertyInfo mjEditableDoubleVal = mjEditableDouble_t.GetProperty("val", BindingFlags.Instance | BindingFlags.Public);
+                MethodInfo mjGetEditableDouble = null, mjSetEditableDouble = null;
+                if (mjEditableDoubleVal != null)
+                {
+                    mjGetEditableDouble = mjEditableDoubleVal.GetGetMethod();
+                    mjSetEditableDouble = mjEditableDoubleVal.GetSetMethod();
+                }
+                if (mjGetEditableDouble == null)
+                {
+                    throw new NotImplementedException("mjGetEditableDouble");
+                }
+                getEditableDouble = DynamicMethodDelegateFactory.CreateFuncDouble(mjGetEditableDouble);
+                if (mjSetEditableDouble == null)
+                {
+                    throw new NotImplementedException("mjSetEditableDouble");
+                }
+                setEditableDouble = DynamicMethodDelegateFactory.Create(mjSetEditableDouble);
+
+                // OrbitalManeuverCalculator
+                Type mjOrbitalManeuverCalculator_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.OrbitalManeuverCalculator");
+                mjDeltaVAndTimeForHohmannTransfer = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVAndTimeForHohmannTransfer", BindingFlags.Static | BindingFlags.Public);
+                if (mjDeltaVAndTimeForHohmannTransfer == null)
+                {
+                    throw new NotImplementedException("mjDeltaVAndTimeForHohmannTransfer");
+                }
+                //deltaVAndTimeForHohmannTransfer = DynamicMethodDelegateFactory.Create(mjDeltaVAndTimeForHohmannTransfer);
+                mjDeltaVAndTimeForInterplanetaryTransferEjection = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVAndTimeForInterplanetaryTransferEjection", BindingFlags.Static | BindingFlags.Public);
+                if (mjDeltaVAndTimeForInterplanetaryTransferEjection == null)
+                {
+                    throw new NotImplementedException("mjDeltaVAndTimeForInterplanetaryTransferEjection");
+                }
+                //deltaVAndTimeForInterplanetaryTransferEjection = DynamicMethodDelegateFactory.Create(mjDeltaVAndTimeForInterplanetaryTransferEjection);
+                MethodInfo mjDeltaVToCircularize = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVToCircularize", BindingFlags.Static | BindingFlags.Public);
+                if (mjDeltaVToCircularize == null)
+                {
+                    throw new NotImplementedException("mjDeltaVToCircularize");
+                }
+                deltaVToCircularize = DynamicMethodDelegateFactory.Create(mjDeltaVToCircularize);
+                MethodInfo mjDeltaVToChangeApoapsis = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVToChangeApoapsis", BindingFlags.Static | BindingFlags.Public);
+                if (mjDeltaVToChangeApoapsis == null)
+                {
+                    throw new NotImplementedException("mjDeltaVToChangeApoapsis");
+                }
+                deltaVToChangeApoapsis = DynamicMethodDelegateFactory.Create(mjDeltaVToChangeApoapsis);
+                MethodInfo mjDeltaVToChangePeriapsis = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVToChangePeriapsis", BindingFlags.Static | BindingFlags.Public);
+                if (mjDeltaVToChangePeriapsis == null)
+                {
+                    throw new NotImplementedException("mjDeltaVToChangePeriapsis");
+                }
+                deltaVToChangePeriapsis = DynamicMethodDelegateFactory.Create(mjDeltaVToChangePeriapsis);
 
                 // MechJebModuleStageStats
                 Type mjModuleStageStats_t = loadedMechJebAssy.assembly.GetExportedTypes()
@@ -331,11 +737,12 @@ namespace JSI
                 {
                     throw new NotImplementedException("mjModuleStageStats_t");
                 }
-                mjRequestUpdate = mjModuleStageStats_t.GetMethod("RequestUpdate", BindingFlags.Instance | BindingFlags.Public);
+                MethodInfo mjRequestUpdate = mjModuleStageStats_t.GetMethod("RequestUpdate", BindingFlags.Instance | BindingFlags.Public);
                 if (mjRequestUpdate == null)
                 {
                     throw new NotImplementedException("mjRequestUpdate");
                 }
+                requestUpdate = DynamicMethodDelegateFactory.Create(mjRequestUpdate);
                 mjVacStageStats = mjModuleStageStats_t.GetField("vacStats", BindingFlags.Instance | BindingFlags.Public);
                 if (mjVacStageStats == null)
                 {
@@ -357,124 +764,40 @@ namespace JSI
                 {
                     throw new NotImplementedException("mjStageStatsLength");
                 }
-                mjStageStatsGetLength = mjStageStatsLength.GetGetMethod();
+                MethodInfo mjStageStatsGetLength = mjStageStatsLength.GetGetMethod();
                 if (mjStageStatsGetLength == null)
                 {
                     throw new NotImplementedException("mjStageStatsGetLength");
                 }
-                mjStageStatsGetIndex = mjVacStageStats.FieldType.GetMethod("Get");
+                stageStatsGetLength = DynamicMethodDelegateFactory.CreateFuncInt(mjStageStatsGetLength);
+                MethodInfo mjStageStatsGetIndex = mjVacStageStats.FieldType.GetMethod("Get");
                 if (mjStageStatsGetIndex == null)
                 {
                     throw new NotImplementedException("mjStageStatsGetIndex");
                 }
+                stageStatsGetIndex = DynamicMethodDelegateFactory.Create(mjStageStatsGetIndex);
 
-                // AbsoluteVector
-                Type mjAbsoluteVector_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.AbsoluteVector");
-                if (mjAbsoluteVector_t == null)
+                // MechJebModuleNodeExecutor
+                Type mjNodeExecutor_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleNodeExecutor");
+                MethodInfo mjExecuteOneNode = mjNodeExecutor_t.GetMethod("ExecuteOneNode", BindingFlags.Instance | BindingFlags.Public);
+                if (mjExecuteOneNode == null)
                 {
-                    throw new NotImplementedException("mjAbsoluteVector_t");
+                    throw new NotImplementedException("mjExecuteOneNode");
                 }
-                mjAbsoluteVectorLat = mjAbsoluteVector_t.GetField("latitude", BindingFlags.Instance | BindingFlags.Public);
-                if (mjAbsoluteVectorLat == null)
+                executeOneNode = DynamicMethodDelegateFactory.Create(mjExecuteOneNode);
+                MethodInfo mjAbortNode = mjNodeExecutor_t.GetMethod("Abort", BindingFlags.Instance | BindingFlags.Public);
+                if (mjAbortNode == null)
                 {
-                    throw new NotImplementedException("mjAbsoluteVectorLat");
+                    throw new NotImplementedException("mjAbortNode");
                 }
-                mjAbsoluteVectorLon = mjAbsoluteVector_t.GetField("longitude", BindingFlags.Instance | BindingFlags.Public);
-                if (mjAbsoluteVectorLon == null)
-                {
-                    throw new NotImplementedException("mjAbsoluteVectorLon");
-                }
+                abortNode = DynamicMethodDelegateFactory.CreateAction(mjAbortNode);
 
-                // MuMech.FuelFlowSimulation
-                Type mjFuelFlowSimulation_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.FuelFlowSimulation");
-                if (mjFuelFlowSimulation_t == null)
-                {
-                    throw new NotImplementedException("mjFuelFlowSimulation_t");
-                }
-                // MuMech.FuelFlowSimulation.Stats
-                Type mjFuelFlowSimulationStats_t = mjFuelFlowSimulation_t.GetNestedType("Stats");
-                if (mjFuelFlowSimulationStats_t == null)
-                {
-                    throw new NotImplementedException("mjFuelFlowSimulationStats_t");
-                }
-                mjStageDv = mjFuelFlowSimulationStats_t.GetField("deltaV", BindingFlags.Instance | BindingFlags.Public);
-                if (mjStageDv == null)
-                {
-                    throw new NotImplementedException("mjStageDv");
-                }
-
-                // MechJebModuleTargetController
-                Type mjModuleTargetController_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleTargetController");
-                if (mjModuleTargetController_t == null)
-                {
-                    throw new NotImplementedException("mjModuleTargetController_t");
-                }
-                mjTargetLongitude = mjModuleTargetController_t.GetField("targetLongitude", BindingFlags.Instance | BindingFlags.Public);
-                if (mjTargetLongitude == null)
-                {
-                    throw new NotImplementedException("mjTargetLongitude");
-                }
-                mjTargetLatitude = mjModuleTargetController_t.GetField("targetLatitude", BindingFlags.Instance | BindingFlags.Public);
-                if (mjTargetLatitude == null)
-                {
-                    throw new NotImplementedException("mjTargetLatitude");
-                }
-                PropertyInfo mjPositionTargetExists = mjModuleTargetController_t.GetProperty("PositionTargetExists", BindingFlags.Instance | BindingFlags.Public);
-                if (mjPositionTargetExists != null)
-                {
-                    mjGetPositionTargetExists = mjPositionTargetExists.GetGetMethod();
-                }
-                if (mjGetPositionTargetExists == null)
-                {
-                    throw new NotImplementedException("mjGetPositionTargetExists");
-                }
-                PropertyInfo mjNormalTargetExists = mjModuleTargetController_t.GetProperty("NormalTargetExists", BindingFlags.Instance | BindingFlags.Public);
-                if (mjPositionTargetExists != null)
-                {
-                    mjGetNormalTargetExists = mjNormalTargetExists.GetGetMethod();
-                }
-                if (mjGetNormalTargetExists == null)
-                {
-                    throw new NotImplementedException("mjGetNormalTargetExists");
-                }
-                PropertyInfo mjTargetOrbit = mjModuleTargetController_t.GetProperty("TargetOrbit", BindingFlags.Instance | BindingFlags.Public); ;
-                if (mjTargetOrbit != null)
-                {
-                    mjGetTargetOrbit = mjTargetOrbit.GetGetMethod();
-                }
-                if (mjGetTargetOrbit == null)
-                {
-                    throw new NotImplementedException("mjGetTargetOrbit");
-                }
-
-                // EditableAngle
-                Type mjEditableAngle_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.EditableAngle");
-                if (mjEditableAngle_t == null)
-                {
-                    throw new NotImplementedException("mjEditableAngle_t");
-                }
-                foreach (MethodInfo method in mjEditableAngle_t.GetMethods(BindingFlags.Static | BindingFlags.Public))
-                {
-                    // The method name reports as "op_Implicit", but there are two
-                    if (method.ReturnType == typeof(System.Double))
-                    {
-                        mjAbsoluteVectorToDouble = method;
-                        break;
-                    }
-                }
-                if (mjAbsoluteVectorToDouble == null)
-                {
-                    throw new NotImplementedException("mjAbsoluteVectorToDouble");
-                }
-
-                // ComputerModule
+                // Computer Module
                 Type mjComputerModule_t = loadedMechJebAssy.assembly.GetExportedTypes()
                     .SingleOrDefault(t => t.FullName == "MuMech.ComputerModule");
                 PropertyInfo mjModuleEnabledProperty = mjComputerModule_t.GetProperty("enabled", BindingFlags.Instance | BindingFlags.Public);
+                MethodInfo mjModuleEnabled = null;
                 if (mjModuleEnabledProperty != null)
                 {
                     mjModuleEnabled = mjModuleEnabledProperty.GetGetMethod();
@@ -483,195 +806,53 @@ namespace JSI
                 {
                     throw new NotImplementedException("mjModuleEnabled");
                 }
+                moduleEnabled = DynamicMethodDelegateFactory.CreateFuncBool(mjModuleEnabled);
                 mjModuleUsers = mjComputerModule_t.GetField("users", BindingFlags.Instance | BindingFlags.Public);
                 if (mjModuleUsers == null)
                 {
                     throw new NotImplementedException("mjModuleUsers");
                 }
-
-                // UserPool
-                Type mjUserPool_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.UserPool");
-                mjAddUser = mjUserPool_t.GetMethod("Add", BindingFlags.Instance | BindingFlags.Public);
-                if (mjAddUser == null)
-                {
-                    throw new NotImplementedException("mjAddUser");
-                }
-                mjRemoveUser = mjUserPool_t.GetMethod("Remove", BindingFlags.Instance | BindingFlags.Public);
-                if (mjRemoveUser == null)
-                {
-                    throw new NotImplementedException("mjRemoveUser");
-                }
-                mjContainsUser = mjUserPool_t.GetMethod("Contains", BindingFlags.Instance | BindingFlags.Public);
-                if (mjContainsUser == null)
-                {
-                    throw new NotImplementedException("mjContainsUser");
-                }
-
-                // MechJebModuleNodeExecutor
-                Type mjNodeExecutor_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleNodeExecutor");
-                mjExecuteOneNode = mjNodeExecutor_t.GetMethod("ExecuteOneNode", BindingFlags.Instance | BindingFlags.Public);
-                if (mjExecuteOneNode == null)
-                {
-                    throw new NotImplementedException("mjExecuteOneNode");
-                }
-                mjAbortNode = mjNodeExecutor_t.GetMethod("Abort", BindingFlags.Instance | BindingFlags.Public);
-                if (mjAbortNode == null)
-                {
-                    throw new NotImplementedException("mjAbortNode");
-                }
-
-                // MechJebModuleLandingAutopilot
-                Type mjLandingAutopilot_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleLandingAutopilot");
-                mjLandAtPositionTarget = mjLandingAutopilot_t.GetMethod("LandAtPositionTarget", BindingFlags.Instance | BindingFlags.Public);
-                if (mjLandAtPositionTarget == null)
-                {
-                    throw new NotImplementedException("mjLandAtPositionTarget");
-                }
-                mjLandUntargeted = mjLandingAutopilot_t.GetMethod("LandUntargeted", BindingFlags.Instance | BindingFlags.Public);
-                if (mjLandUntargeted == null)
-                {
-                    throw new NotImplementedException("mjLandUntargeted");
-                }
-                mjStopLanding = mjLandingAutopilot_t.GetMethod("StopLanding", BindingFlags.Instance | BindingFlags.Public);
-                if (mjStopLanding == null)
-                {
-                    throw new NotImplementedException("mjStopLanding");
-                }
-
-                // MechJebModuleSmartASS
-                Type mjSmartass_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleSmartASS");
-                mjSmartassTarget = mjSmartass_t.GetField("target", BindingFlags.Instance | BindingFlags.Public);
-                if (mjSmartassTarget == null)
-                {
-                    throw new NotImplementedException("mjSmartassTarget");
-                }
-                mjSmartassEngage = mjSmartass_t.GetMethod("Engage", BindingFlags.Instance | BindingFlags.Public);
-                if (mjSmartassEngage == null)
-                {
-                    throw new NotImplementedException("mjSmartassEngage");
-                }
-                mjSmartassForceRol = mjSmartass_t.GetField("forceRol", BindingFlags.Instance | BindingFlags.Public);
-                if (mjSmartassForceRol == null)
-                {
-                    throw new NotImplementedException("mjSmartassForceRol");
-                }
-                mjSmartassRol = mjSmartass_t.GetField("rol", BindingFlags.Instance | BindingFlags.Public);
-                if (mjSmartassRol == null)
-                {
-                    throw new NotImplementedException("mjSmartassRol");
-                }
-                FieldInfo TargetTextsInfo = mjSmartass_t.GetField("TargetTexts", BindingFlags.Static | BindingFlags.Public);
-                TargetTexts = (string[])TargetTextsInfo.GetValue(null);
-                if (TargetTexts == null)
-                {
-                    throw new NotImplementedException("TargetTexts");
-                }
-                FieldInfo ModeTextsInfo = mjSmartass_t.GetField("ModeTexts", BindingFlags.Static | BindingFlags.Public);
-                ModeTexts = (string[])ModeTextsInfo.GetValue(null);
-                if (ModeTexts == null)
-                {
-                    throw new NotImplementedException("ModeTexts");
-                }
-
-                // EditableDouble
-                Type mjEditableDouble_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.EditableDouble");
-                PropertyInfo mjEditableDoubleVal = mjEditableDouble_t.GetProperty("val", BindingFlags.Instance | BindingFlags.Public);
-                if (mjEditableDoubleVal != null)
-                {
-                    mjGetEditableDouble = mjEditableDoubleVal.GetGetMethod();
-                    mjSetEditableDouble = mjEditableDoubleVal.GetSetMethod();
-                }
-                if (mjGetEditableDouble == null)
-                {
-                    throw new NotImplementedException("mjGetEditableDouble");
-                }
-                if (mjSetEditableDouble == null)
-                {
-                    throw new NotImplementedException("mjSetEditableDouble");
-                }
-
-                // OrbitalManeuverCalculator
-                Type mjOrbitalManeuverCalculator_t = loadedMechJebAssy.assembly.GetExportedTypes()
-                    .SingleOrDefault(t => t.FullName == "MuMech.OrbitalManeuverCalculator");
-                mjDeltaVAndTimeForHohmannTransfer = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVAndTimeForHohmannTransfer", BindingFlags.Static | BindingFlags.Public);
-                if (mjDeltaVAndTimeForHohmannTransfer == null)
-                {
-                    throw new NotImplementedException("mjDeltaVAndTimeForHohmannTransfer");
-                }
-                mjDeltaVAndTimeForInterplanetaryTransferEjection = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVAndTimeForInterplanetaryTransferEjection", BindingFlags.Static | BindingFlags.Public);
-                if (mjDeltaVAndTimeForInterplanetaryTransferEjection == null)
-                {
-                    throw new NotImplementedException("mjDeltaVAndTimeForInterplanetaryTransferEjection");
-                }
-                mjDeltaVToCircularize = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVToCircularize", BindingFlags.Static | BindingFlags.Public);
-                if (mjDeltaVToCircularize == null)
-                {
-                    throw new NotImplementedException("mjDeltaVToCircularize");
-                }
-
-                mjFound = true;
             }
             catch (Exception e)
             {
-                mjFound = false;
-                JUtil.LogMessage(this, "Exception triggered when configuring: {0}", e);
+                mjMechJebCore_t = null;
+                JUtil.LogMessage(null, "Exception initializing JSIMechJeb: {0}", e);
             }
 
-            if (JUtil.debugLoggingEnabled)
+            if (mjMechJebCore_t != null && getMasterMechJeb != null)
             {
-                JUtil.LogMessage(this, "A supported version of MechJeb is {0}", (mjFound) ? "present" : "not available");
+                mjFound = true;
+            }
+            else
+            {
+                mjFound = false;
             }
         }
 
-        private void InvalidateResults()
+        public JSIMechJeb()
         {
-            activeJeb = null;
-
-            landingCurrent = false;
-            deltaVCurrent = false;
-
-            deltaV = 0.0;
-            deltaVStage = 0.0;
-
-            landingLat = 0.0;
-            landingLon = 0.0;
-            landingAlt = 0.0;
-            landingErr = -1.0;
+            JUtil.LogMessage(this, "A supported version of MechJeb is {0}", (mjFound) ? "present" : "not available");
         }
 
         #region Internal Methods
         /// <summary>
         /// Invokes VesselExtensions.GetMasterMechJeb()
         /// </summary>
-        /// <returns>true if MJ is available, false otherwise</returns>
-        private bool GetMasterMechJeb()
+        /// <returns>The master MechJeb on the vessel</returns>
+        static private object GetMasterMechJeb(Vessel vessel)
         {
-            // Is MechJeb installed?
-            if (mjFound)
+            object activeJeb = null;
+            try
             {
-                // Have we already updated activeJeb?
-                if (activeJeb == null && vessel != null)
+                // Is MechJeb installed?
+                if (mjFound && vessel != null)
                 {
-                    foreach (Part part in vessel.Parts)
-                    {
-                        foreach (PartModule module in part.Modules)
-                        {
-                            if (module.GetType() == mjMechJebCore_t)
-                            {
-                                activeJeb = mjGetMasterMechJeb.Invoke(null, new object[] { vessel });
-                                break;
-                            }
-                        }
-                    }
+                    activeJeb = getMasterMechJeb(null, new object[] { vessel });
                 }
             }
+            catch { }
 
-            return (activeJeb != null);
+            return activeJeb;
         }
 
         /// <summary>
@@ -680,11 +861,11 @@ namespace JSI
         /// <param name="masterMechJeb"></param>
         /// <param name="computerModule"></param>
         /// <returns></returns>
-        private object GetComputerModule(object masterMechJeb, string computerModule)
+        static private object GetComputerModule(object masterMechJeb, string computerModule)
         {
             if (masterMechJeb != null)
             {
-                return mjGetComputerModule.Invoke(masterMechJeb, new object[] { computerModule });
+                return getComputerModule(masterMechJeb, new object[] { computerModule });
             }
             else
             {
@@ -697,11 +878,11 @@ namespace JSI
         /// </summary>
         /// <param name="module"></param>
         /// <returns></returns>
-        private bool ModuleEnabled(object module)
+        static private bool ModuleEnabled(object module)
         {
             if (module != null)
             {
-                return (bool)mjModuleEnabled.Invoke(module, null);
+                return moduleEnabled(module);
             }
             else
             {
@@ -713,34 +894,33 @@ namespace JSI
         /// Return the latest landing simulation results, or null if there aren't any.
         /// </summary>
         /// <returns></returns>
-        private object GetLandingResults(object masterMechJeb)
+        static private object GetLandingResults(object masterMechJeb)
         {
             object predictor = GetComputerModule(masterMechJeb, "MechJebModuleLandingPredictions");
             if (predictor != null && ModuleEnabled(predictor) == true)
             {
-                return mjPredictionsGetResult.Invoke(predictor, null);
+                return getPredictionsResult(predictor, new object[] { });
             }
 
             return null;
         }
 
-        private void EnactTargetAction(Target action)
+        static private void EnactTargetAction(Vessel vessel, Target action)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
 
-            JUtil.LogMessage(this, "EnactTargetAction {0}", action);
             if (activeSmartass != null)
             {
                 mjSmartassTarget.SetValue(activeSmartass, (int)action);
 
-                mjSmartassEngage.Invoke(activeSmartass, new object[] { true });
+                engageSmartass(activeSmartass, new object[] { true });
             }
         }
 
         private bool ReturnTargetState(Target action)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
 
             if (activeSmartass != null)
@@ -759,11 +939,15 @@ namespace JSI
         /// <summary>
         /// Update the landing prediction stats
         /// </summary>
-        private void UpdateLandingStats()
+        private void UpdateLandingStats(object activeJeb)
         {
+            if (Planetarium.GetUniversalTime() - lastUpdate < 0.5)
+            {
+                // Don't update more than twice a second.
+                return;
+            }
             try
             {
-                GetMasterMechJeb();
                 object result = GetLandingResults(activeJeb);
                 if (result != null)
                 {
@@ -791,13 +975,17 @@ namespace JSI
                             object target = mjCoreTarget.GetValue(activeJeb);
                             object targetLatField = mjTargetLatitude.GetValue(target);
                             object targetLonField = mjTargetLongitude.GetValue(target);
-                            double targetLat = (double)mjAbsoluteVectorToDouble.Invoke(null, new object[] { targetLatField });
-                            double targetLon = (double)mjAbsoluteVectorToDouble.Invoke(null, new object[] { targetLonField });
+                            double targetLat = (double)absoluteVectorToDouble(null, new object[] { targetLatField });
+                            double targetLon = (double)absoluteVectorToDouble(null, new object[] { targetLonField });
                             double targetAlt = FinePrint.Utilities.CelestialUtilities.TerrainAltitude(vessel.mainBody, targetLat, targetLon);
 
                             landingErr = Vector3d.Distance(vessel.mainBody.GetRelSurfacePosition(landingLat, landingLon, landingAlt),
                                                 vessel.mainBody.GetRelSurfacePosition(targetLat, targetLon, targetAlt));
                         }
+                        object endTime = mjReentryTime.GetValue(result);
+                        landingTime = (double)endTime;
+
+                        lastUpdate = Planetarium.GetUniversalTime();
                     }
                 }
             }
@@ -810,57 +998,53 @@ namespace JSI
         /// <summary>
         /// Updates dV stats (dV and dVStage)
         /// </summary>
-        private void UpdateDeltaVStats()
+        private void UpdateDeltaVStats(object activeJeb)
         {
             try
             {
-                GetMasterMechJeb();
-                if (activeJeb != null)
+                object stagestats = GetComputerModule(activeJeb, "MechJebModuleStageStats");
+
+                requestUpdate(stagestats, new object[] { this });
+
+                int atmStatsLength = 0, vacStatsLength = 0;
+
+                object atmStatsO = mjAtmStageStats.GetValue(stagestats);
+                object vacStatsO = mjVacStageStats.GetValue(stagestats);
+                if (atmStatsO != null)
                 {
-                    object stagestats = GetComputerModule(activeJeb, "MechJebModuleStageStats");
+                    atmStatsLength = stageStatsGetLength(atmStatsO);
+                }
+                if (vacStatsO != null)
+                {
+                    vacStatsLength = stageStatsGetLength(vacStatsO);
+                }
 
-                    mjRequestUpdate.Invoke(stagestats, new object[] { this });
+                deltaV = deltaVStage = 0.0;
 
-                    int atmStatsLength = 0, vacStatsLength = 0;
+                if (atmStatsLength > 0 && atmStatsLength == vacStatsLength)
+                {
+                    double atmospheresLocal = vessel.staticPressurekPa * PhysicsGlobals.KpaToAtmospheres;
 
-                    object atmStatsO = mjAtmStageStats.GetValue(stagestats);
-                    object vacStatsO = mjVacStageStats.GetValue(stagestats);
-                    if (atmStatsO != null)
+                    for (int i = 0; i < atmStatsLength; ++i)
                     {
-                        atmStatsLength = (int)mjStageStatsGetLength.Invoke(atmStatsO, null);
-                    }
-                    if (vacStatsO != null)
-                    {
-                        vacStatsLength = (int)mjStageStatsGetLength.Invoke(vacStatsO, null);
-                    }
-
-                    deltaV = deltaVStage = 0.0;
-
-                    if (atmStatsLength > 0 && atmStatsLength == vacStatsLength)
-                    {
-                        double atmospheresLocal = vessel.staticPressurekPa * PhysicsGlobals.KpaToAtmospheres;
-
-                        for (int i = 0; i < atmStatsLength; ++i)
+                        object atmStat = stageStatsGetIndex(atmStatsO, new object[] { i });
+                        object vacStat = stageStatsGetIndex(vacStatsO, new object[] { i });
+                        if (atmStat == null || vacStat == null)
                         {
-                            object atmStat = mjStageStatsGetIndex.Invoke(atmStatsO, new object[] { i });
-                            object vacStat = mjStageStatsGetIndex.Invoke(vacStatsO, new object[] { i });
-                            if (atmStat == null || vacStat == null)
-                            {
-                                throw new NotImplementedException("atmStat or vacState did not evaluate");
-                            }
-
-                            float atm = (float)mjStageDv.GetValue(atmStat);
-                            float vac = (float)mjStageDv.GetValue(vacStat);
-                            double stagedV = UtilMath.LerpUnclamped(vac, atm, atmospheresLocal);
-
-                            deltaV += stagedV;
-
-                            if (i == (atmStatsLength - 1))
-                            {
-                                deltaVStage = stagedV;
-                            }
-
+                            throw new NotImplementedException("atmStat or vacState did not evaluate");
                         }
+
+                        float atm = (float)mjStageDv.GetValue(atmStat);
+                        float vac = (float)mjStageDv.GetValue(vacStat);
+                        double stagedV = UtilMath.LerpUnclamped(vac, atm, atmospheresLocal);
+
+                        deltaV += stagedV;
+
+                        if (i == (atmStatsLength - 1))
+                        {
+                            deltaVStage = stagedV;
+                        }
+
                     }
                 }
             }
@@ -880,13 +1064,19 @@ namespace JSI
         /// <returns>true if MJ is available for query</returns>
         public bool GetMechJebAvailable()
         {
+            object activeJeb = null;
+            try
+            {
+                activeJeb = GetMasterMechJeb(vessel);
+            }
+            catch { }
 
-            return GetMasterMechJeb();
+            return (activeJeb != null);
         }
 
-        public void SetSmartassMode(Target t)
+        internal void SetSmartassMode(Target t)
         {
-            EnactTargetAction(t);
+            EnactTargetAction(vessel, t);
         }
 
         /// <summary>
@@ -895,7 +1085,9 @@ namespace JSI
         /// <returns></returns>
         public int GetSmartassMode()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+
+            if (activeJeb != null)
             {
                 object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
 
@@ -915,18 +1107,11 @@ namespace JSI
         /// <returns>-1 if the prediction is unavailable for whatever reason</returns>
         public double GetLandingError()
         {
-            if (GetMasterMechJeb())
-            {
-                if (moduleInvalidated)
-                {
-                    InvalidateResults();
-                    moduleInvalidated = false;
-                }
+            object activeJeb = GetMasterMechJeb(vessel);
 
-                if (landingCurrent == false)
-                {
-                    UpdateLandingStats();
-                }
+            if (activeJeb != null)
+            {
+                UpdateLandingStats(activeJeb);
 
                 return landingErr;
             }
@@ -942,18 +1127,10 @@ namespace JSI
         /// <returns>-1 if the prediction is unavailable for whatever reason</returns>
         public double GetLandingLatitude()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
-                if (moduleInvalidated)
-                {
-                    InvalidateResults();
-                    moduleInvalidated = false;
-                }
-
-                if (landingCurrent == false)
-                {
-                    UpdateLandingStats();
-                }
+                UpdateLandingStats(activeJeb);
 
                 return landingLat;
             }
@@ -969,20 +1146,31 @@ namespace JSI
         /// <returns>-1 if the prediction is unavailable for whatever reason</returns>
         public double GetLandingLongitude()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
-                if (moduleInvalidated)
-                {
-                    InvalidateResults();
-                    moduleInvalidated = false;
-                }
-
-                if (landingCurrent == false)
-                {
-                    UpdateLandingStats();
-                }
+                UpdateLandingStats(activeJeb);
 
                 return landingLon;
+            }
+            else
+            {
+                return 0.0;
+            }
+        }
+
+        /// <summary>
+        /// Provide the MechJeb estimate for landing time.
+        /// </summary>
+        /// <returns></returns>
+        public double GetLandingTime()
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
+            {
+                UpdateLandingStats(activeJeb);
+
+                return landingTime - Planetarium.GetUniversalTime();
             }
             else
             {
@@ -996,18 +1184,10 @@ namespace JSI
         /// <returns>-1 if the prediction is unavailable for whatever reason</returns>
         public double GetLandingAltitude()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
-                if (moduleInvalidated)
-                {
-                    InvalidateResults();
-                    moduleInvalidated = false;
-                }
-
-                if (landingCurrent == false)
-                {
-                    UpdateLandingStats();
-                }
+                UpdateLandingStats(activeJeb);
 
                 return landingAlt;
             }
@@ -1023,18 +1203,10 @@ namespace JSI
         /// <returns>Returns NaN if MJ is unavailable.</returns>
         public double GetDeltaV()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
-                if (moduleInvalidated)
-                {
-                    InvalidateResults();
-                    moduleInvalidated = false;
-                }
-
-                if (deltaVCurrent == false)
-                {
-                    UpdateDeltaVStats();
-                }
+                UpdateDeltaVStats(activeJeb);
 
                 return deltaV;
             }
@@ -1050,18 +1222,10 @@ namespace JSI
         /// <returns>Returns NaN if MJ is unavailable.</returns>
         public double GetStageDeltaV()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
-                if (moduleInvalidated)
-                {
-                    InvalidateResults();
-                    moduleInvalidated = false;
-                }
-
-                if (deltaVCurrent == false)
-                {
-                    UpdateDeltaVStats();
-                }
+                UpdateDeltaVStats(activeJeb);
 
                 return deltaVStage;
             }
@@ -1071,15 +1235,52 @@ namespace JSI
             }
         }
 
+        public double GetLaunchAltitude()
+        {
+            double alt = 0.0;
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ascent = GetComputerModule(activeJeb, "MechJebModuleAscentAutopilot");
+            if (ascent != null)
+            {
+                object desiredAlt = launchOrbitAltitude.GetValue(ascent);
+                if (desiredAlt != null)
+                {
+                    //object mult_o = getEditableDoubleMultMultiplier.GetValue(desiredAlt);
+                    object alt_o = getEditableDoubleMult(desiredAlt);
+
+                    if (alt_o != null)
+                    {
+                        alt = (double)alt_o;
+                    }
+                }
+            }
+
+            return alt;
+        }
+
+        public void SetLaunchAltitude(double altitude)
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ascent = GetComputerModule(activeJeb, "MechJebModuleAscentAutopilot");
+            if (ascent != null)
+            {
+                object desiredAlt = launchOrbitAltitude.GetValue(ascent);
+                if (desiredAlt != null)
+                {
+                    setEditableDoubleMult(desiredAlt, new object[] { altitude });
+                }
+            }
+        }
+
         public double GetForceRollAngle()
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
             if (activeSmartass != null)
             {
                 object forceRol = mjSmartassForceRol.GetValue(activeSmartass);
                 object rolValue = mjSmartassRol.GetValue(activeSmartass);
-                return (double)mjGetEditableDouble.Invoke(rolValue, null);
+                return getEditableDouble(rolValue);
             }
             else
             {
@@ -1090,12 +1291,13 @@ namespace JSI
 
         public double GetTerminalVelocity()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
                 object vesselState = mjCoreVesselState.GetValue(activeJeb);
                 if (vesselState != null)
                 {
-                    double value = (double)mjTerminalVelocity.Invoke(vesselState, null);
+                    double value = terminalVelocity(vesselState);
                     return (double.IsNaN(value)) ? double.PositiveInfinity : value;
                 }
             }
@@ -1109,10 +1311,11 @@ namespace JSI
         /// <returns></returns>
         public bool PositionTargetExists()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
                 object target = mjCoreTarget.GetValue(activeJeb);
-                if ((bool)mjGetPositionTargetExists.Invoke(target, null))
+                if (getPositionTargetExists(target))
                 {
                     return true;
                 }
@@ -1134,13 +1337,13 @@ namespace JSI
             // MOARdV BUG: This doesn't seem to work if any of the
             // attitude settings are active (like "Prograde").
             //if (activeJeb.attitude.enabled && !activeJeb.attitude.users.Contains(activeSmartass))
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object attitude = mjCoreAttitude.GetValue(activeJeb);
             if (ModuleEnabled(attitude))
             {
                 object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
                 object users = mjModuleUsers.GetValue(attitude);
-                return (bool)mjContainsUser.Invoke(users, new object[] { activeSmartass });
+                return (bool)containsUser(users, new object[] { activeSmartass });
             }
 
             return false;
@@ -1148,13 +1351,13 @@ namespace JSI
 
         private bool ForceRollState(double roll)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
             if (activeSmartass != null)
             {
                 object forceRol = mjSmartassForceRol.GetValue(activeSmartass);
                 object rolValue = mjSmartassRol.GetValue(activeSmartass);
-                double rol = (double)mjGetEditableDouble.Invoke(rolValue, null);
+                double rol = getEditableDouble(rolValue);
 
                 return (bool)forceRol && (Math.Abs(roll - rol) < 0.5);
             }
@@ -1166,7 +1369,7 @@ namespace JSI
 
         public bool GetModuleExists(string moduleName)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object module = GetComputerModule(activeJeb, moduleName);
 
             return (module != null);
@@ -1174,18 +1377,85 @@ namespace JSI
 
         public void ForceRoll(bool state, double roll)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
             if (activeSmartass != null)
             {
                 if (state)
                 {
                     object rolValue = mjSmartassRol.GetValue(activeSmartass);
-                    mjSetEditableDouble.Invoke(rolValue, new object[] { roll });
+                    setEditableDouble(rolValue, new object[] { roll });
                     mjSmartassRol.SetValue(activeSmartass, rolValue);
                 }
                 mjSmartassForceRol.SetValue(activeSmartass, state);
-                mjSmartassEngage.Invoke(activeSmartass, new object[] { true });
+                engageSmartass(activeSmartass, new object[] { true });
+            }
+        }
+
+        public void CircularizeAtAltitude(double altitude)
+        {
+            if (GetMechJebAvailable() && altitude >= vessel.orbit.PeA && altitude <= vessel.orbit.ApA)
+            {
+                // Add validation
+                double UT = vessel.orbit.NextTimeOfRadius(Planetarium.GetUniversalTime(), vessel.orbit.referenceBody.Radius + altitude);
+
+                Vector3d dV;
+
+                dV = (Vector3d)deltaVToCircularize(null, new object[] { vessel.orbit, UT });
+
+                if (vessel.patchedConicSolver != null)
+                {
+                    while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
+                    {
+                        vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
+                    }
+                }
+
+                placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
+            }
+        }
+
+        public void ChangeApoapsis(double altitude)
+        {
+            if (GetMechJebAvailable() && altitude >= vessel.orbit.PeA)
+            {
+                double UT = vessel.orbit.NextPeriapsisTime(Planetarium.GetUniversalTime());
+
+                Vector3d dV;
+
+                dV = (Vector3d)deltaVToChangeApoapsis(null, new object[] { vessel.orbit, UT, vessel.orbit.referenceBody.Radius + altitude });
+
+                if (vessel.patchedConicSolver != null)
+                {
+                    while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
+                    {
+                        vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
+                    }
+                }
+
+                placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
+            }
+        }
+
+        public void ChangePeriapsis(double altitude)
+        {
+            if (GetMechJebAvailable() && altitude <= vessel.orbit.ApA)
+            {
+                double UT = vessel.orbit.NextApoapsisTime(Planetarium.GetUniversalTime());
+
+                Vector3d dV;
+
+                dV = (Vector3d)deltaVToChangePeriapsis(null, new object[] { vessel.orbit, UT, vessel.orbit.referenceBody.Radius + altitude });
+
+                if (vessel.patchedConicSolver != null)
+                {
+                    while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
+                    {
+                        vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
+                    }
+                }
+
+                placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
             }
         }
 
@@ -1193,7 +1463,7 @@ namespace JSI
         {
             Vector3d dV;
 
-            dV = (Vector3d)mjDeltaVToCircularize.Invoke(null, new object[] { vessel.orbit, UT });
+            dV = (Vector3d)deltaVToCircularize(null, new object[] { vessel.orbit, UT });
 
             if (vessel.patchedConicSolver != null)
             {
@@ -1203,7 +1473,105 @@ namespace JSI
                 }
             }
 
-            mjPlaceManeuverNode.Invoke(null, new object[] { vessel, vessel.orbit, dV, UT });
+            placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
+        }
+
+        public double SpaceplaneHoldAltitude()
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object altitude = spaceplaneAltitude.GetValue(ap);
+                return getEditableDouble(altitude);
+            }
+            else
+            {
+                return 0.0;
+            }
+        }
+
+        public void SetSpaceplaneHoldAltitude(double altitude)
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object holdAltitude = spaceplaneAltitude.GetValue(ap);
+                setEditableDouble(holdAltitude, new object[] { altitude });
+            }
+        }
+
+        public bool SpaceplaneAltitudeProximity()
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object holdaltitude = spaceplaneAltitude.GetValue(ap);
+                double goalAltitude = getEditableDouble(holdaltitude);
+                double currentAltitude = vessel.altitude;
+
+                return (Math.Abs(currentAltitude - goalAltitude) <= 500.0);
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        public double SpaceplaneHoldHeading()
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object heading = spaceplaneHeading.GetValue(ap);
+                return getEditableDouble(heading);
+            }
+            else
+            {
+                return 0.0;
+            }
+
+        }
+
+        public void SetSpaceplaneHoldHeading(double heading)
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object holdHeading = spaceplaneHeading.GetValue(ap);
+                setEditableDouble(holdHeading, new object[] { heading });
+            }
+        }
+
+        public double SpaceplaneGlideslope()
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object slope = spaceplaneGlideslope.GetValue(ap);
+                return getEditableDouble(slope);
+            }
+            else
+            {
+                return 0.0;
+            }
+
+        }
+
+        public void SetSpaceplaneGlideslope(double angle)
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object slope = spaceplaneGlideslope.GetValue(ap);
+                setEditableDouble(slope, new object[] { angle });
+            }
         }
         #endregion
 
@@ -1215,7 +1583,8 @@ namespace JSI
         /// <param name="state"></param>
         public void ButtonNodeExecute(bool state)
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
                 object node = mjCoreNode.GetValue(activeJeb);
                 object mp = GetComputerModule(activeJeb, "MechJebModuleManeuverPlanner");
@@ -1225,12 +1594,12 @@ namespace JSI
                     {
                         if (!ModuleEnabled(node))
                         {
-                            mjExecuteOneNode.Invoke(node, new object[] { mp });
+                            executeOneNode(node, new object[] { mp });
                         }
                     }
                     else
                     {
-                        mjAbortNode.Invoke(node, null);
+                        abortNode(node);
                     }
                 }
             }
@@ -1242,7 +1611,8 @@ namespace JSI
         /// <returns></returns>
         public bool ButtonNodeExecuteState()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
                 object ap = mjCoreNode.GetValue(activeJeb);
                 return ModuleEnabled(ap);
@@ -1259,24 +1629,41 @@ namespace JSI
         /// <param name="state"></param>
         public void ButtonAscentGuidance(bool state)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object ap = GetComputerModule(activeJeb, "MechJebModuleAscentAutopilot");
-            object agPilot = GetComputerModule(activeJeb, "MechJebModuleAscentGuidance");
 
-            if (ap != null && agPilot != null)
+            if (ap != null)
             {
-                object users = mjModuleUsers.GetValue(ap);
-                if (users == null)
+                // MOARdV TODO: When MJ 2.5.4 (or higher) is out, remove the
+                // null check here and eliminate the else path, since getAAPEngaged
+                // will be the only valid path.
+                if (setAscentAutopilotEngaged != null)
                 {
-                    throw new NotImplementedException("mjModuleUsers(ap) was null");
-                }
-                if (ModuleEnabled(ap))
-                {
-                    mjRemoveUser.Invoke(users, new object[] { agPilot });
+                    setAscentAutopilotEngaged(ap, new object[] { state });
                 }
                 else
                 {
-                    mjAddUser.Invoke(users, new object[] { agPilot });
+                    object users = mjModuleUsers.GetValue(ap);
+                    if (users == null)
+                    {
+                        throw new NotImplementedException("mjModuleUsers(ap) was null");
+                    }
+
+                    object agPilot = GetComputerModule(activeJeb, "MechJebModuleAscentGuidance");
+                    if(agPilot == null)
+                    {
+                        JUtil.LogErrorMessage(this, "Unable to fetch MechJebModuleAscentGuidance");
+                        return;
+                    }
+
+                    if (ModuleEnabled(ap))
+                    {
+                        removeUser(users, new object[] { agPilot });
+                    }
+                    else
+                    {
+                        addUser(users, new object[] { agPilot });
+                    }
                 }
             }
         }
@@ -1287,10 +1674,22 @@ namespace JSI
         /// <returns></returns>
         public bool ButtonAscentGuidanceState()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
                 object ap = GetComputerModule(activeJeb, "MechJebModuleAscentAutopilot");
-                return ModuleEnabled(ap);
+
+                // MOARdV TODO: When MJ 2.5.4 (or higher) is out, remove the
+                // null check here and eliminate the else path, since getAAPEngaged
+                // will be the only valid path.
+                if (getAscentAutopilotEngaged != null)
+                {
+                    return getAscentAutopilotEngaged(ap);
+                }
+                else
+                {
+                    return ModuleEnabled(ap);
+                }
             }
             else
             {
@@ -1300,7 +1699,7 @@ namespace JSI
 
         public void ButtonDockingGuidance(bool state)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object autopilot = GetComputerModule(activeJeb, "MechJebModuleDockingAutopilot");
             object autopilotController = GetComputerModule(activeJeb, "MechJebModuleDockingGuidance");
 
@@ -1313,18 +1712,18 @@ namespace JSI
                 }
                 if (ModuleEnabled(autopilot))
                 {
-                    mjRemoveUser.Invoke(users, new object[] { autopilotController });
+                    removeUser(users, new object[] { autopilotController });
                 }
                 else if (FlightGlobals.fetch.VesselTarget is ModuleDockingNode)
                 {
-                    mjAddUser.Invoke(users, new object[] { autopilotController });
+                    addUser(users, new object[] { autopilotController });
                 }
             }
         }
 
         public bool ButtonDockingGuidanceState()
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object ap = GetComputerModule(activeJeb, "MechJebModuleDockingAutopilot");
             return ModuleEnabled(ap);
         }
@@ -1342,10 +1741,10 @@ namespace JSI
                 return;
             }
 
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
 
             object target = mjCoreTarget.GetValue(activeJeb);
-            Orbit targetOrbit = (Orbit)mjGetTargetOrbit.Invoke(target, null);
+            Orbit targetOrbit = (Orbit)getTargetOrbit(target);
             Orbit o = vessel.orbit;
             Vector3d dV;
             double nodeUT = 0.0;
@@ -1370,7 +1769,7 @@ namespace JSI
                 }
             }
 
-            mjPlaceManeuverNode.Invoke(null, new object[] { vessel, o, dV, nodeUT });
+            placeManeuverNode(null, new object[] { vessel, o, dV, nodeUT });
         }
 
         /// <summary>
@@ -1384,7 +1783,8 @@ namespace JSI
                 return false;
             }
 
-            if (!GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb == null)
             {
                 return false;
             }
@@ -1397,7 +1797,7 @@ namespace JSI
 
             // Most of these conditions are directly from MJ, or derived from
             // it.
-            if ((bool)mjGetNormalTargetExists.Invoke(target, null) == false)
+            if (getNormalTargetExists(target) == false)
             {
                 return false;
             }
@@ -1409,7 +1809,7 @@ namespace JSI
                 return false;
             }
 
-            Orbit targetOrbit = (Orbit)mjGetTargetOrbit.Invoke(target, null);
+            Orbit targetOrbit = (Orbit)getTargetOrbit(target);
             if (o.referenceBody == targetOrbit.referenceBody)
             {
                 // Target is in our SoI
@@ -1457,7 +1857,8 @@ namespace JSI
         /// <param name="state"></param>
         public void ButtonLandingGuidance(bool state)
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
                 object autopilot = GetComputerModule(activeJeb, "MechJebModuleLandingAutopilot");
                 if (state != ModuleEnabled(autopilot))
@@ -1468,19 +1869,19 @@ namespace JSI
                         if (landingGuidanceAP != null)
                         {
                             object target = mjCoreTarget.GetValue(activeJeb);
-                            if ((bool)mjGetPositionTargetExists.Invoke(target, null))
+                            if (getPositionTargetExists(target))
                             {
-                                mjLandAtPositionTarget.Invoke(autopilot, new object[] { landingGuidanceAP });
+                                landAtPositionTarget(autopilot, new object[] { landingGuidanceAP });
                             }
                             else
                             {
-                                mjLandUntargeted.Invoke(autopilot, new object[] { landingGuidanceAP });
+                                landUntargeted(autopilot, new object[] { landingGuidanceAP });
                             }
                         }
                     }
                     else
                     {
-                        mjStopLanding.Invoke(autopilot, null);
+                        stopLanding(autopilot);
                     }
                 }
             }
@@ -1492,7 +1893,8 @@ namespace JSI
         /// <returns>true if on, false if not</returns>
         public bool ButtonLandingGuidanceState()
         {
-            if (GetMasterMechJeb())
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb != null)
             {
                 object ap = GetComputerModule(activeJeb, "MechJebModuleLandingAutopilot");
                 return ModuleEnabled(ap);
@@ -1509,12 +1911,12 @@ namespace JSI
         /// <param name="state"></param>
         public void ButtonForceRoll(bool state)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
             if (activeSmartass != null)
             {
                 mjSmartassForceRol.SetValue(activeSmartass, state);
-                mjSmartassEngage.Invoke(activeSmartass, new object[] { true });
+                engageSmartass(activeSmartass, new object[] { true });
             }
         }
 
@@ -1524,7 +1926,7 @@ namespace JSI
         /// <returns></returns>
         public bool ButtonForceRollState()
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object activeSmartass = GetComputerModule(activeJeb, "MechJebModuleSmartASS");
             if (activeSmartass != null)
             {
@@ -1616,7 +2018,7 @@ namespace JSI
         /// <param name="state">Enable/disable</param>
         public void ButtonEnableLandingPrediction(bool state)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object predictor = GetComputerModule(activeJeb, "MechJebModuleLandingPredictions");
             object landingGuidanceAP = GetComputerModule(activeJeb, "MechJebModuleLandingGuidance");
 
@@ -1629,11 +2031,11 @@ namespace JSI
                 }
                 if (state)
                 {
-                    mjAddUser.Invoke(users, new object[] { landingGuidanceAP });
+                    addUser(users, new object[] { landingGuidanceAP });
                 }
                 else
                 {
-                    mjRemoveUser.Invoke(users, new object[] { landingGuidanceAP });
+                    removeUser(users, new object[] { landingGuidanceAP });
                 }
             }
         }
@@ -1645,7 +2047,7 @@ namespace JSI
         /// <returns></returns>
         public bool ButtonEnableLandingPredictionState()
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object ap = GetComputerModule(activeJeb, "MechJebModuleLandingPredictions");
             return ModuleEnabled(ap);
         }
@@ -1656,7 +2058,7 @@ namespace JSI
         /// <param name="state"></param>
         public void ButtonRendezvousAutopilot(bool state)
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object autopilot = GetComputerModule(activeJeb, "MechJebModuleRendezvousAutopilot");
             object autopilotController = GetComputerModule(activeJeb, "MechJebModuleRendezvousAutopilotWindow");
 
@@ -1669,11 +2071,11 @@ namespace JSI
                 }
                 if (state)
                 {
-                    mjAddUser.Invoke(users, new object[] { autopilotController });
+                    addUser(users, new object[] { autopilotController });
                 }
                 else
                 {
-                    mjRemoveUser.Invoke(users, new object[] { autopilotController });
+                    removeUser(users, new object[] { autopilotController });
                 }
             }
         }
@@ -1684,10 +2086,93 @@ namespace JSI
         /// <returns></returns>
         public bool ButtonRendezvousAutopilotState()
         {
-            GetMasterMechJeb();
+            object activeJeb = GetMasterMechJeb(vessel);
             object ap = GetComputerModule(activeJeb, "MechJebModuleRendezvousAutopilot");
             return ModuleEnabled(ap);
         }
+
+        /// <summary>
+        /// Instructs the craft to hold heading (or disables autopilot).
+        /// </summary>
+        /// <param name="state"></param>
+        public void ButtonSpaceplaneHoldHeading(bool state)
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            object controller = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneGuidance");
+            if (ap != null && controller != null)
+            {
+                if (state)
+                {
+                    spaceplaneHoldHeading(ap, new object[] { controller });
+                }
+                else
+                {
+                    spaceplaneAPOff(ap);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns true if SP autopilot is in Hold Heading mode
+        /// </summary>
+        /// <returns></returns>
+        public bool ButtonSpaceplaneHoldHeadingState()
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object mode = spaceplaneAPMode.GetValue(ap);
+                return ((int)mode == (int)SpaceplaneMode.HOLD);
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Enables / disabled spaceplane Autoland mode
+        /// </summary>
+        /// <returns></returns>
+        public void ButtonSpaceplaneAutoland(bool state)
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            object controller = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneGuidance");
+            if (ap != null && controller != null)
+            {
+                if (state)
+                {
+                    spaceplaneAutoland(ap, new object[] { controller });
+                }
+                else
+                {
+                    spaceplaneAPOff(ap);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns true if SP autopilot is in Autoland mode
+        /// </summary>
+        /// <returns></returns>
+        public bool ButtonSpaceplaneAutolandState()
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ap = GetComputerModule(activeJeb, "MechJebModuleSpaceplaneAutopilot");
+            if (ap != null)
+            {
+                object mode = spaceplaneAPMode.GetValue(ap);
+                return ((int)mode == (int)SpaceplaneMode.AUTOLAND);
+            }
+            else
+            {
+                return false;
+            }
+        }
+
 
         // All the other buttons are pretty much identical and just use different enum values.
 
@@ -1695,7 +2180,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonOff(bool state)
         {
-            EnactTargetAction(Target.OFF);
+            EnactTargetAction(vessel, Target.OFF);
         }
 
         public bool ButtonOffState()
@@ -1710,11 +2195,11 @@ namespace JSI
             {
                 if (state && vessel.patchedConicSolver.maneuverNodes.Count > 0)
                 {
-                    EnactTargetAction(Target.NODE);
+                    EnactTargetAction(vessel, Target.NODE);
                 }
                 else if (!state)
                 {
-                    EnactTargetAction(Target.OFF);
+                    EnactTargetAction(vessel, Target.OFF);
                 }
             }
         }
@@ -1727,7 +2212,7 @@ namespace JSI
         // KillRot button
         public void ButtonKillRot(bool state)
         {
-            EnactTargetAction((state) ? Target.KILLROT : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.KILLROT : Target.OFF);
         }
 
         public bool ButtonKillRotState()
@@ -1738,7 +2223,7 @@ namespace JSI
         // Prograde button
         public void ButtonPrograde(bool state)
         {
-            EnactTargetAction((state) ? Target.PROGRADE : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.PROGRADE : Target.OFF);
         }
         public bool ButtonProgradeState()
         {
@@ -1748,7 +2233,7 @@ namespace JSI
         // Retrograde button
         public void ButtonRetrograde(bool state)
         {
-            EnactTargetAction((state) ? Target.RETROGRADE : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.RETROGRADE : Target.OFF);
         }
         public bool ButtonRetrogradeState()
         {
@@ -1758,7 +2243,7 @@ namespace JSI
         // NML+ button
         public void ButtonNormalPlus(bool state)
         {
-            EnactTargetAction((state) ? Target.NORMAL_PLUS : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.NORMAL_PLUS : Target.OFF);
         }
         public bool ButtonNormalPlusState()
         {
@@ -1768,7 +2253,7 @@ namespace JSI
         // NML- button
         public void ButtonNormalMinus(bool state)
         {
-            EnactTargetAction((state) ? Target.NORMAL_MINUS : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.NORMAL_MINUS : Target.OFF);
         }
         public bool ButtonNormalMinusState()
         {
@@ -1778,7 +2263,7 @@ namespace JSI
         // RAD+ button
         public void ButtonRadialPlus(bool state)
         {
-            EnactTargetAction((state) ? Target.RADIAL_PLUS : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.RADIAL_PLUS : Target.OFF);
         }
         public bool ButtonRadialPlusState()
         {
@@ -1788,7 +2273,7 @@ namespace JSI
         // RAD- button
         public void ButtonRadialMinus(bool state)
         {
-            EnactTargetAction((state) ? Target.RADIAL_MINUS : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.RADIAL_MINUS : Target.OFF);
         }
         public bool ButtonRadialMinusState()
         {
@@ -1798,7 +2283,7 @@ namespace JSI
         // Surface prograde button
         public void ButtonSurfacePrograde(bool state)
         {
-            EnactTargetAction((state) ? Target.SURFACE_PROGRADE : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.SURFACE_PROGRADE : Target.OFF);
         }
         public bool ButtonSurfaceProgradeState()
         {
@@ -1808,7 +2293,7 @@ namespace JSI
         // Surface Retrograde button
         public void ButtonSurfaceRetrograde(bool state)
         {
-            EnactTargetAction((state) ? Target.SURFACE_RETROGRADE : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.SURFACE_RETROGRADE : Target.OFF);
         }
         public bool ButtonSurfaceRetrogradeState()
         {
@@ -1818,7 +2303,7 @@ namespace JSI
         // Horizontal + button
         public void ButtonHorizontalPlus(bool state)
         {
-            EnactTargetAction((state) ? Target.HORIZONTAL_PLUS : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.HORIZONTAL_PLUS : Target.OFF);
         }
         public bool ButtonHorizontalPlusState()
         {
@@ -1828,7 +2313,7 @@ namespace JSI
         // Horizontal - button
         public void ButtonHorizontalMinus(bool state)
         {
-            EnactTargetAction((state) ? Target.HORIZONTAL_MINUS : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.HORIZONTAL_MINUS : Target.OFF);
         }
         public bool ButtonHorizontalMinusState()
         {
@@ -1838,7 +2323,7 @@ namespace JSI
         // Up button
         public void ButtonVerticalPlus(bool state)
         {
-            EnactTargetAction((state) ? Target.VERTICAL_PLUS : Target.OFF);
+            EnactTargetAction(vessel, (state) ? Target.VERTICAL_PLUS : Target.OFF);
         }
         public bool ButtonVerticalPlusState()
         {
@@ -1851,11 +2336,11 @@ namespace JSI
         {
             if (!state)
             {
-                EnactTargetAction(Target.OFF);
+                EnactTargetAction(vessel, Target.OFF);
             }
             else if (FlightGlobals.fetch.VesselTarget != null)
             {
-                EnactTargetAction(Target.TARGET_PLUS);
+                EnactTargetAction(vessel, Target.TARGET_PLUS);
             }
         }
         public bool ButtonTargetPlusState()
@@ -1868,11 +2353,11 @@ namespace JSI
         {
             if (!state)
             {
-                EnactTargetAction(Target.OFF);
+                EnactTargetAction(vessel, Target.OFF);
             }
             else if (FlightGlobals.fetch.VesselTarget != null)
             {
-                EnactTargetAction(Target.TARGET_MINUS);
+                EnactTargetAction(vessel, Target.TARGET_MINUS);
             }
         }
         public bool ButtonTargetMinusState()
@@ -1885,11 +2370,11 @@ namespace JSI
         {
             if (!state)
             {
-                EnactTargetAction(Target.OFF);
+                EnactTargetAction(vessel, Target.OFF);
             }
             else if (FlightGlobals.fetch.VesselTarget != null)
             {
-                EnactTargetAction(Target.RELATIVE_PLUS);
+                EnactTargetAction(vessel, Target.RELATIVE_PLUS);
             }
         }
         public bool ButtonRvelPlusState()
@@ -1902,11 +2387,11 @@ namespace JSI
         {
             if (!state)
             {
-                EnactTargetAction(Target.OFF);
+                EnactTargetAction(vessel, Target.OFF);
             }
             else if (FlightGlobals.fetch.VesselTarget != null)
             {
-                EnactTargetAction(Target.RELATIVE_MINUS);
+                EnactTargetAction(vessel, Target.RELATIVE_MINUS);
             }
         }
         public bool ButtonRvelMinusState()
@@ -1919,11 +2404,11 @@ namespace JSI
         {
             if (!state)
             {
-                EnactTargetAction(Target.OFF);
+                EnactTargetAction(vessel, Target.OFF);
             }
             else if (FlightGlobals.fetch.VesselTarget != null)
             {
-                EnactTargetAction(Target.PARALLEL_PLUS);
+                EnactTargetAction(vessel, Target.PARALLEL_PLUS);
             }
         }
         public bool ButtonParPlusState()
@@ -1936,11 +2421,11 @@ namespace JSI
         {
             if (!state)
             {
-                EnactTargetAction(Target.OFF);
+                EnactTargetAction(vessel, Target.OFF);
             }
             else if (FlightGlobals.fetch.VesselTarget != null)
             {
-                EnactTargetAction(Target.PARALLEL_MINUS);
+                EnactTargetAction(vessel, Target.PARALLEL_MINUS);
             }
         }
         public bool ButtonParMinusState()

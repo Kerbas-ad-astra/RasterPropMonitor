@@ -1,3 +1,23 @@
+/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -6,12 +26,12 @@ using System.Globalization;
 
 namespace JSI
 {
-    public class JSIActionGroupSwitch : InternalModule
+    internal class JSIActionGroupSwitch : InternalModule
     {
         [KSPField]
         public string animationName = string.Empty;
         [KSPField]
-        public bool animateExterior;
+        public bool animateExterior = false;
         [KSPField]
         public string switchTransform = string.Empty;
         [KSPField]
@@ -22,23 +42,28 @@ namespace JSI
         public string perPodMasterSwitchName = string.Empty;
         [KSPField]
         public string masterVariableName = string.Empty;
-        private VariableOrNumber masterVariable = null;
+        private VariableOrNumberRange masterVariable = null;
         [KSPField]
         public string masterVariableRange = string.Empty;
-        private VariableOrNumber[] masterRange = new VariableOrNumber[2];
         [KSPField]
-        public bool reverse;
+        public bool reverse = false;
         [KSPField]
         public float customSpeed = 1f;
         [KSPField]
-        public string internalLightName;
+        public string internalLightName = string.Empty;
         [KSPField]
-        public string needsElectricCharge;
+        public string needsElectricCharge = string.Empty;
         private bool needsElectricChargeValue;
+        [KSPField]
+        public string resourceName = "SYSR_ELECTRICCHARGE";
         [KSPField]
         public string switchSound = "Squad/Sounds/sound_click_flick";
         [KSPField]
         public float switchSoundVolume = 0.5f;
+        [KSPField]
+        public string loopingSound = string.Empty;
+        [KSPField]
+        public float loopingSoundVolume = 0.0f;
         [KSPField]
         public string coloredObject = string.Empty;
         [KSPField]
@@ -60,7 +85,7 @@ namespace JSI
         [KSPField]
         public int refreshRate = 60;
         // Neater.
-        private static readonly Dictionary<string, KSPActionGroup> groupList = new Dictionary<string, KSPActionGroup> { 
+        internal static readonly Dictionary<string, KSPActionGroup> groupList = new Dictionary<string, KSPActionGroup> { 
 			{ "gear",KSPActionGroup.Gear },
 			{ "brakes",KSPActionGroup.Brakes },
 			{ "lights",KSPActionGroup.Light },
@@ -79,24 +104,44 @@ namespace JSI
 			{ "custom09",KSPActionGroup.Custom09 },
 			{ "custom10",KSPActionGroup.Custom10 }
 		};
-        private readonly Dictionary<string, bool> customGroupList = new Dictionary<string, bool> {
-			{ "intlight",false },
-			{ "dummy",false },
-			{ "plugin",false },
-		};
+        internal enum CustomActions
+        {
+            None,
+            IntLight,
+            Dummy,
+            Plugin,
+            Stage,
+            Transfer
+        };
+        private bool customGroupState = false;
+        internal static readonly Dictionary<string, CustomActions> customGroupList = new Dictionary<string, CustomActions> {
+            { "---none---", CustomActions.None},
+            { "intlight", CustomActions.IntLight },
+            { "dummy",CustomActions.Dummy },
+            { "plugin",CustomActions.Plugin },
+            { "transfer", CustomActions.Transfer},
+            { "stage",CustomActions.Stage }
+        };
+        private KSPActionGroup kspAction = KSPActionGroup.None;
+        private CustomActions customAction = CustomActions.None;
         private Animation anim;
         private bool currentState;
         private bool isCustomAction;
         private string persistentVarName;
         private Light[] lightObjects;
         private FXGroup audioOutput;
+        private FXGroup loopingOutput;
         private int lightCheckCountdown;
-        private PersistenceAccessor persistence;
+        private RasterPropMonitorComputer rpmComp;
         private bool startupComplete;
         private Renderer colorShiftRenderer;
-        private Func<bool> stateHandler;
+        private string stateVariable = string.Empty;
         private Action<bool> actionHandler;
         private bool isPluginAction;
+
+        private string transferGetter = string.Empty;
+        private Action<double> transferSetter;
+        private string transferPersistentName;
 
         // Consume-on-toggle and consume-while-active
         private bool consumingOnToggleUp, consumingOnToggleDown;
@@ -190,18 +235,16 @@ namespace JSI
                         else
                         {
                             consumingWhileActive = true;
-                            if (JUtil.debugLoggingEnabled)
-                            {
-                                JUtil.LogMessage(this, "Switch in prop {0} prop id {1} will consume {2} while active at a rate of {3}", internalProp.propName,
-                                    internalProp.propID, consumeWhileActiveName, consumeWhileActiveAmount);
-                            }
+                            JUtil.LogMessage(this, "Switch in prop {0} prop id {1} will consume {2} while active at a rate of {3}", internalProp.propName,
+                                internalProp.propID, consumeWhileActiveName, consumeWhileActiveAmount);
                         }
                     }
                 }
 
                 if (groupList.ContainsKey(actionName))
                 {
-                    currentState = vessel.ActionGroups[groupList[actionName]];
+                    kspAction = groupList[actionName];
+                    currentState = vessel.ActionGroups[kspAction];
                     // action group switches may not belong to a radio group
                     switchGroupIdentifier = -1;
                 }
@@ -232,14 +275,18 @@ namespace JSI
 
                                             if (actionHandler == null)
                                             {
-                                                JUtil.LogErrorMessage(this, "Failed to instantiate action handler {0}", pluginConfig.GetValue("name"));
+                                                JUtil.LogErrorMessage(this, "Failed to instantiate action handler {0}", action);
                                             }
                                             else
                                             {
                                                 if (pluginConfig.HasValue("stateMethod"))
                                                 {
                                                     string state = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("stateMethod").Trim();
-                                                    stateHandler = (Func<bool>)comp.GetMethod(state, internalProp, typeof(Func<bool>));
+                                                    stateVariable = "PLUGIN_" + state;
+                                                }
+                                                else if (pluginConfig.HasValue("stateVariable"))
+                                                {
+                                                    stateVariable = pluginConfig.GetValue("stateVariable").Trim();
                                                 }
                                                 isPluginAction = true;
                                                 break;
@@ -252,6 +299,74 @@ namespace JSI
                             {
                                 actionName = "dummy";
                                 JUtil.LogMessage(this, "Plugin handlers did not start, reverting to dummy mode.");
+                            }
+                            break;
+                        case "transfer":
+                            persistentVarName = string.Empty;
+                            comp.UpdateDataRefreshRate(refreshRate);
+
+                            foreach (ConfigNode node in GameDatabase.Instance.GetConfigNodes("PROP"))
+                            {
+                                if (node.GetValue("name") == internalProp.propName)
+                                {
+                                    foreach (ConfigNode pluginConfig in node.GetNodes("MODULE")[moduleID].GetNodes("TRANSFERACTION"))
+                                    {
+                                        if ((pluginConfig.HasValue("name") || pluginConfig.HasValue("getVariable")) && pluginConfig.HasValue("perPodPersistenceName"))
+                                        {
+                                            transferPersistentName = pluginConfig.GetValue("perPodPersistenceName").Trim();
+                                            if (pluginConfig.HasValue("stateMethod"))
+                                            {
+                                                string state = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("stateMethod").Trim();
+                                                stateVariable = "PLUGIN_" + state;
+                                            }
+                                            else if (pluginConfig.HasValue("stateVariable"))
+                                            {
+                                                stateVariable = pluginConfig.GetValue("stateVariable").Trim();
+                                            }
+                                            if (pluginConfig.HasValue("setMethod"))
+                                            {
+                                                string action = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("setMethod").Trim();
+                                                transferSetter = (Action<double>)comp.GetMethod(action, internalProp, typeof(Action<double>));
+
+                                                if (transferSetter == null)
+                                                {
+                                                    JUtil.LogErrorMessage(this, "Failed to instantiate transfer handler {0}", pluginConfig.GetValue("name"));
+                                                }
+                                                else
+                                                {
+                                                    //JUtil.LogMessage(this, "Got setter {0}", action);
+                                                    break;
+                                                }
+                                            }
+                                            else if (pluginConfig.HasValue("getMethod"))
+                                            {
+                                                string action = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("getMethod").Trim();
+                                                var getter = (Func<double>)comp.GetMethod(action, internalProp, typeof(Func<double>));
+
+                                                if (getter == null)
+                                                {
+                                                    JUtil.LogErrorMessage(this, "Failed to instantiate transfer handler {0}", pluginConfig.GetValue("name"));
+                                                }
+                                                else
+                                                {
+                                                    transferGetter = "PLUGIN_" + action;
+                                                    //JUtil.LogMessage(this, "Got getter {0}", action);
+                                                    break;
+                                                }
+                                            }
+                                            else if (pluginConfig.HasValue("getVariable"))
+                                            {
+                                                transferGetter = pluginConfig.GetValue("getVariable").Trim();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (string.IsNullOrEmpty(transferGetter) && transferSetter == null)
+                            {
+                                actionName = "dummy";
+                                stateVariable = string.Empty;
+                                JUtil.LogMessage(this, "Transfer handlers did not start, reverting to dummy mode.");
                             }
                             break;
                         default:
@@ -269,20 +384,24 @@ namespace JSI
                     }
                 }
 
-                if (needsElectricChargeValue || !string.IsNullOrEmpty(persistentVarName) || !string.IsNullOrEmpty(perPodMasterSwitchName) || !string.IsNullOrEmpty(masterVariableName))
+                if (customGroupList.ContainsKey(actionName))
                 {
-                    persistence = new PersistenceAccessor(internalProp);
+                    customAction = customGroupList[actionName];
+                }
+
+                if (needsElectricChargeValue || !string.IsNullOrEmpty(persistentVarName) || !string.IsNullOrEmpty(perPodMasterSwitchName) || !string.IsNullOrEmpty(masterVariableName) ||
+                    !string.IsNullOrEmpty(transferGetter) || transferSetter != null)
+                {
+                    rpmComp = RasterPropMonitorComputer.Instantiate(internalProp);
 
                     comp.UpdateDataRefreshRate(refreshRate);
 
                     if (!string.IsNullOrEmpty(masterVariableName))
                     {
-                        masterVariable = new VariableOrNumber(masterVariableName, this);
                         string[] range = masterVariableRange.Split(',');
                         if (range.Length == 2)
                         {
-                            masterRange[0] = new VariableOrNumber(range[0], this);
-                            masterRange[1] = new VariableOrNumber(range[1], this);
+                            masterVariable = new VariableOrNumberRange(masterVariableName, range[0], range[1]);
                         }
                         else
                         {
@@ -299,47 +418,54 @@ namespace JSI
 
                 if (isCustomAction)
                 {
-                    if (isPluginAction && stateHandler != null)
+                    if (isPluginAction && !string.IsNullOrEmpty(stateVariable))
                     {
-                        currentState = stateHandler();
+                        try
+                        {
+                            currentState = (comp.ProcessVariable(stateVariable, -1).MassageToInt()) > 0;
+                        }
+                        catch
+                        {
+                            // no-op
+                        }
                     }
                     else
                     {
-                        if (persistence != null)
+                        if (rpmComp != null && !string.IsNullOrEmpty(persistentVarName))
                         {
                             if (switchGroupIdentifier >= 0)
                             {
-                                int activeSwitch = persistence.GetVar(persistentVarName, 0);
+                                int activeSwitch = rpmComp.GetVar(persistentVarName, 0);
 
-                                currentState = customGroupList[actionName] = (switchGroupIdentifier == activeSwitch);
+                                currentState = customGroupState = (switchGroupIdentifier == activeSwitch);
                             }
                             else
                             {
-                                currentState = customGroupList[actionName] = persistence.GetBool(persistentVarName, initialState);
+                                currentState = customGroupState = rpmComp.GetBool(persistentVarName, initialState);
                             }
 
-                            if (actionName == "intlight")
+                            if (customAction == CustomActions.IntLight)
                             {
                                 // We have to restore lighting after reading the
                                 // persistent variable.
-                                SetInternalLights(customGroupList[actionName]);
+                                SetInternalLights(customGroupState);
                             }
                         }
                     }
                 }
 
-                if (persistence != null && !persistence.HasVar(persistentVarName))
+                if (rpmComp != null && !rpmComp.HasVar(persistentVarName))
                 {
                     if (switchGroupIdentifier >= 0)
                     {
                         if (currentState)
                         {
-                            persistence.SetVar(persistentVarName, switchGroupIdentifier);
+                            rpmComp.SetVar(persistentVarName, switchGroupIdentifier);
                         }
                     }
                     else
                     {
-                        persistence.SetVar(persistentVarName, currentState);
+                        rpmComp.SetVar(persistentVarName, currentState);
                     }
                 }
 
@@ -382,10 +508,15 @@ namespace JSI
                 }
                 else
                 {
-                    JUtil.LogMessage(this, "Warning, neither color nor animation are defined in prop {0} #{1}.", internalProp.propName, internalProp.propID);
+                    JUtil.LogMessage(this, "Warning, neither color nor animation are defined in prop {0} #{1} (this may be okay).", internalProp.propName, internalProp.propID);
                 }
 
                 audioOutput = JUtil.SetupIVASound(internalProp, switchSound, switchSoundVolume, false);
+
+                if (!string.IsNullOrEmpty(loopingSound) && loopingSoundVolume > 0.0f)
+                {
+                    loopingOutput = JUtil.SetupIVASound(internalProp, loopingSound, loopingSoundVolume, true);
+                }
 
                 startupComplete = true;
             }
@@ -400,7 +531,7 @@ namespace JSI
         public void OnDestroy()
         {
             //JUtil.LogMessage(this, "OnDestroy()");
-            persistence = null;
+            rpmComp = null;
         }
 
         private void SetInternalLights(bool value)
@@ -423,22 +554,12 @@ namespace JSI
             {
                 if (!string.IsNullOrEmpty(perPodMasterSwitchName))
                 {
-                    switchEnabled = persistence.GetBool(perPodMasterSwitchName, false);
+                    switchEnabled = rpmComp.GetBool(perPodMasterSwitchName, false);
                 }
                 if (masterVariable != null)
                 {
                     RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                    float value, range1, range2;
-                    if (masterVariable.Get(out value, comp, persistence) && masterRange[0].Get(out range1, comp, persistence) && masterRange[1].Get(out range2, comp, persistence))
-                    {
-                        float minR = Mathf.Min(range1, range2);
-                        float maxR = Mathf.Max(range1, range2);
-                        if (value < minR || value > maxR)
-                        {
-                            // If the master variable is out of spec, disable the switch.
-                            switchEnabled = false;
-                        }
-                    }
+                    switchEnabled = masterVariable.IsInRange(comp);
                 }
             }
             if (!switchEnabled)
@@ -453,42 +574,70 @@ namespace JSI
             {
                 if (switchGroupIdentifier >= 0)
                 {
-                    if (!forcedShutdown && !customGroupList[actionName])
+                    if (!forcedShutdown && !customGroupState)
                     {
-                        customGroupList[actionName] = true;
+                        customGroupState = true;
                         if (!string.IsNullOrEmpty(persistentVarName))
                         {
-                            persistence.SetVar(persistentVarName, switchGroupIdentifier);
+                            rpmComp.SetVar(persistentVarName, switchGroupIdentifier);
                         }
                     }
                     // else: can't turn off a radio group switch.
                 }
+                else if (customAction == CustomActions.Plugin && !string.IsNullOrEmpty(stateVariable))
+                {
+                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                    int ivalue = comp.ProcessVariable(stateVariable, -1).MassageToInt();
+                    customGroupState = (ivalue < 1) && !forcedShutdown;
+                }
                 else
                 {
-                    customGroupList[actionName] = !customGroupList[actionName];
+                    customGroupState = !customGroupState;
                     if (!string.IsNullOrEmpty(persistentVarName))
                     {
-                        persistence.SetVar(persistentVarName, customGroupList[actionName]);
+                        rpmComp.SetVar(persistentVarName, customGroupState);
                     }
                 }
             }
             else
             {
-                vessel.ActionGroups.ToggleGroup(groupList[actionName]);
+                vessel.ActionGroups.ToggleGroup(kspAction);
             }
             // Now we do extra things that with regular actions can't happen.
-            switch (actionName)
+            switch (customAction)
             {
-                case "intlight":
-                    SetInternalLights(customGroupList[actionName]);
+                case CustomActions.IntLight:
+                    SetInternalLights(customGroupState);
                     break;
-                case "plugin":
-                    actionHandler((stateHandler != null) ? !stateHandler() : customGroupList[actionName]);
+                case CustomActions.Plugin:
+                    actionHandler(customGroupState);
                     break;
-                case "stage":
+                case CustomActions.Stage:
                     if (InputLockManager.IsUnlocked(ControlTypes.STAGING))
                     {
                         Staging.ActivateNextStage();
+                    }
+                    break;
+                case CustomActions.Transfer:
+                    if (!string.IsNullOrEmpty(stateVariable))
+                    {
+                        // stateVariable can disable the button functionality.
+                        RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                        int ivalue = comp.ProcessVariable(stateVariable, -1).MassageToInt();
+                        if (ivalue < 1)
+                        {
+                            return; // early - button disabled
+                        }
+                    }
+                    if (!string.IsNullOrEmpty(transferGetter))
+                    {
+                        RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                        float value = comp.ProcessVariable(transferGetter, internalProp.propID).MassageToFloat();
+                        rpmComp.SetVar(transferPersistentName, (int)value);
+                    }
+                    else if (rpmComp.HasVar(transferPersistentName))
+                    {
+                        transferSetter((double)rpmComp.GetVar(transferPersistentName));
                     }
                     break;
             }
@@ -508,7 +657,15 @@ namespace JSI
 
             if (!JUtil.IsActiveVessel(vessel))
             {
+                if (loopingOutput != null && currentState == true)
+                {
+                    loopingOutput.audio.volume = 0.0f;
+                }
                 return;
+            }
+            else if (loopingOutput != null && currentState == true && loopingOutput.Active)
+            {
+                loopingOutput.audio.volume = loopingSoundVolume * GameSettings.SHIP_VOLUME;
             }
 
             if (consumingWhileActive && currentState && !forcedShutdown)
@@ -527,9 +684,17 @@ namespace JSI
             // So there's no check for internal cameras.
 
             bool newState;
-            if (isPluginAction && stateHandler != null)
+            if (isPluginAction && !string.IsNullOrEmpty(stateVariable))
             {
-                newState = stateHandler();
+                try
+                {
+                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                    newState = (comp.ProcessVariable(stateVariable, -1).MassageToInt()) > 0;
+                }
+                catch
+                {
+                    newState = currentState;
+                }
             }
             else if (isCustomAction)
             {
@@ -537,14 +702,14 @@ namespace JSI
                 {
                     if (switchGroupIdentifier >= 0)
                     {
-                        int activeGroupId = persistence.GetVar(persistentVarName, 0);
+                        int activeGroupId = rpmComp.GetVar(persistentVarName, 0);
                         newState = (switchGroupIdentifier == activeGroupId);
-                        customGroupList[actionName] = newState;
+                        customGroupState = newState;
                     }
                     else
                     {
                         // If the switch transform is not given, and the global comp.Persistence value is, this means this is a slave module.
-                        newState = persistence.GetBool(persistentVarName, false);
+                        newState = rpmComp.GetBool(persistentVarName, false);
                     }
                 }
                 else
@@ -554,24 +719,24 @@ namespace JSI
                     {
                         if (switchGroupIdentifier >= 0)
                         {
-                            int activeGroupId = persistence.GetVar(persistentVarName, 0);
+                            int activeGroupId = rpmComp.GetVar(persistentVarName, 0);
                             newState = (switchGroupIdentifier == activeGroupId);
-                            customGroupList[actionName] = newState;
+                            customGroupState = newState;
                         }
                         else
                         {
-                            newState = persistence.GetBool(persistentVarName, customGroupList[actionName]);
+                            newState = rpmComp.GetBool(persistentVarName, customGroupState);
                         }
                     }
                     else
                     {
-                        newState = customGroupList[actionName];
+                        newState = customGroupState;
                     }
                 }
             }
             else
             {
-                newState = vessel.ActionGroups[groupList[actionName]];
+                newState = vessel.ActionGroups[kspAction];
             }
 
             // If needsElectricCharge is true and there is no charge, the state value is overridden to false and the click action is reexecuted.
@@ -582,13 +747,13 @@ namespace JSI
                 {
                     RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
                     lightCheckCountdown = refreshRate;
-                    forcedShutdown |= currentState && comp.ProcessVariable("SYSR_ELECTRICCHARGE", null).MassageToDouble() < 0.01d;
+                    forcedShutdown |= currentState && comp.ProcessVariable(resourceName).MassageToFloat() < 0.01f;
                 }
             }
 
             if (!string.IsNullOrEmpty(perPodMasterSwitchName))
             {
-                bool switchEnabled = persistence.GetBool(perPodMasterSwitchName, false);
+                bool switchEnabled = rpmComp.GetBool(perPodMasterSwitchName, false);
                 if (!switchEnabled)
                 {
                     // If the master switch is 'off', this switch needs to turn off
@@ -600,17 +765,10 @@ namespace JSI
             if (masterVariable != null)
             {
                 RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                float value, range1, range2;
-                if (masterVariable.Get(out value, comp, persistence) && masterRange[0].Get(out range1, comp, persistence) && masterRange[1].Get(out range2, comp, persistence))
+                if (!masterVariable.IsInRange(comp))
                 {
-                    float minR = Mathf.Min(range1, range2);
-                    float maxR = Mathf.Max(range1, range2);
-                    if (value < minR || value > maxR)
-                    {
-                        // If the master variable is out of spec, disable the switch.
-                        newState = false;
-                        forcedShutdown = true;
-                    }
+                    newState = false;
+                    forcedShutdown = true;
                 }
             }
 
@@ -637,11 +795,26 @@ namespace JSI
                         forcedShutdown = true;
                     }
                 }
+
                 if (audioOutput != null && (CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.IVA ||
                     CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.Internal))
                 {
                     audioOutput.audio.Play();
                 }
+
+                if (loopingOutput != null && (CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.IVA ||
+                    CameraManager.Instance.currentCameraMode == CameraManager.CameraMode.Internal))
+                {
+                    if (newState)
+                    {
+                        loopingOutput.audio.Play();
+                    }
+                    else
+                    {
+                        loopingOutput.audio.Stop();
+                    }
+                }
+
                 if (anim != null)
                 {
                     if (newState ^ reverse)
@@ -667,4 +840,3 @@ namespace JSI
 
     }
 }
-

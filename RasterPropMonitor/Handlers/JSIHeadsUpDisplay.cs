@@ -1,4 +1,24 @@
-﻿using System;
+﻿/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
+using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
@@ -81,8 +101,6 @@ namespace JSI
         private bool startupComplete;
         private bool firstRenderComplete;
 
-        private PersistenceAccessor persistence;
-
         /// <summary>
         /// Initialize the renderable game objects for the HUD.
         /// </summary>
@@ -128,13 +146,15 @@ namespace JSI
                 ladderMaterial.mainTexture = GameDatabase.Instance.GetTexture(horizonTexture.EnforceSlashes(), false);
                 if (ladderMaterial.mainTexture != null)
                 {
+                    float diagonal = horizonSize.magnitude / Mathf.Min(horizonSize.x, horizonSize.y) * 0.5f;
+                    Vector2 horizonDrawSize = diagonal * horizonSize;
                     horizonTextureSize.x = 0.5f * (horizonTextureSize.x / ladderMaterial.mainTexture.width);
                     horizonTextureSize.y = 0.5f * (horizonTextureSize.y / ladderMaterial.mainTexture.height);
 
                     ladderMaterial.mainTexture.wrapMode = TextureWrapMode.Clamp;
 
-                    ladderMesh = JUtil.CreateSimplePlane("JSIHeadsUpDisplayLadder" + hudCamera.GetInstanceID(), new Vector2(horizonSize.x * 0.5f, horizonSize.y * 0.5f), new Rect(0.0f, 0.0f, 1.0f, 1.0f), drawingLayer);
-                    ladderMesh.transform.position = new Vector3(0, 0, 1.4f);
+                    ladderMesh = JUtil.CreateSimplePlane("JSIHeadsUpDisplayLadder" + hudCamera.GetInstanceID(), horizonDrawSize, new Rect(0.0f, 0.0f, 1.0f, 1.0f), drawingLayer);
+                    ladderMesh.transform.position = new Vector3(0, 0, 1.45f);
                     ladderMesh.renderer.material = ladderMaterial;
                     ladderMesh.transform.parent = cameraBody.transform;
 
@@ -163,7 +183,7 @@ namespace JSI
                         progradeIconMaterial.SetVector("_Color", progradeColorValue);
 
                         progradeLadderIcon = JUtil.CreateSimplePlane("JSIHeadsUpDisplayLadderProgradeIcon" + hudCamera.GetInstanceID(), new Vector2(iconPixelSize * 0.5f, iconPixelSize * 0.5f), texCoord, drawingLayer);
-                        progradeLadderIcon.transform.position = new Vector3(0.0f, 0.0f, 1.35f);
+                        progradeLadderIcon.transform.position = new Vector3(0.0f, 0.0f, 1.41f);
                         progradeLadderIcon.renderer.material = progradeIconMaterial;
                         progradeLadderIcon.transform.parent = cameraBody.transform;
                     }
@@ -372,7 +392,7 @@ namespace JSI
 
             for (int i = 0; i < verticalBars.Count; ++i)
             {
-                verticalBars[i].Update(comp, persistence);
+                verticalBars[i].Update(comp);
             }
 
             GL.Clear(true, true, backgroundColorValue);
@@ -460,8 +480,6 @@ namespace JSI
                 {
                     progradeColorValue = ConfigNode.ParseColor32(progradeColor);
                 }
-
-                persistence = new PersistenceAccessor(internalProp);
             }
             catch (Exception e)
             {
@@ -486,8 +504,6 @@ namespace JSI
             {
                 JUtil.DisposeOfGameObjects(new GameObject[] { verticalBars[i].barObject });
             }
-
-            persistence = null;
         }
     }
 
@@ -509,7 +525,7 @@ namespace JSI
             {
                 throw new Exception("VerticalBar " + node.GetValue("name") + " missing variableName");
             }
-            variable = new VariableOrNumber(node.GetValue("variableName"), this);
+            variable = VariableOrNumber.Instantiate(node.GetValue("variableName"));
 
             if (!node.HasValue("texture"))
             {
@@ -596,18 +612,18 @@ namespace JSI
             JUtil.ShowHide(true, barObject);
         }
 
-        internal void Update(RPMVesselComputer comp, PersistenceAccessor persistence)
+        internal void Update(RPMVesselComputer comp)
         {
             float value;
             if (enablingVariable != null)
             {
-                if (!enablingVariable.IsInRange(comp, persistence))
+                if (!enablingVariable.IsInRange(comp))
                 {
                     return;
                 }
             }
 
-            if (variable.Get(out value, comp, persistence))
+            if (variable.Get(out value, comp))
             {
                 if (useLog10)
                 {

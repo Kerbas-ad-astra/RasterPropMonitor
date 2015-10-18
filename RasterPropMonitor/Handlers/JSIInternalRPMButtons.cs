@@ -1,4 +1,25 @@
-﻿using System;
+﻿/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
+using System;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace JSI
@@ -9,8 +30,6 @@ namespace JSI
     /// </summary>
     public class JSIInternalRPMButtons : IJSIModule
     {
-        public JSIInternalRPMButtons(Vessel _vessel) : base(_vessel) { }
-
         /// <summary>
         /// Turns on the flowState for all resources on the ship.
         /// </summary>
@@ -202,7 +221,7 @@ namespace JSI
                             gen.Shutdown();
                         }
                     }
-                    else if(pm is ModuleResourceConverter)
+                    else if (pm is ModuleResourceConverter)
                     {
                         ModuleResourceConverter gen = pm as ModuleResourceConverter;
                         if (state)
@@ -615,6 +634,338 @@ namespace JSI
         }
 
         /// <summary>
+        /// Undock the current reference part, or the inferred first dock on
+        /// the current vessel.
+        /// 
+        /// The state of the dock appears to be queriable only by reading a
+        /// string.  The possible values of that string (that I've discovered)
+        /// are:
+        /// 
+        /// "Disabled", for shielded docking ports that are closed.
+        /// "Docked (dockee)", for docks that were docked to (recipient dock).
+        /// "Docked (docker)", for docks that initiated the docking.
+        /// "PreAttached", for docks that were attached to something in the VAB
+        /// "Ready", for docks that are ready.
+        /// </summary>
+        /// <param name="state">New state - must be 'false' to trigger the undock event</param>
+        public void DockUndock(bool state)
+        {
+            if (vessel == null || state == true)
+            {
+                return;
+            }
+
+            ModuleDockingNode node = InferDockingNode(vessel);
+            if (node != null)
+            {
+                if ((node.state == "Docked (docker)") || (node.state == "Docked (dockee)"))
+                {
+                    node.Undock();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Detach a docking node that was attached in the VAB.
+        /// </summary>
+        /// <param name="state">New state - must be 'false' to trigger</param>
+        public void DockDetach(bool state)
+        {
+            if (vessel == null || state == true)
+            {
+                return;
+            }
+
+            ModuleDockingNode node = InferDockingNode(vessel);
+            if (node != null)
+            {
+                if (node.state == "PreAttached")
+                {
+                    node.Decouple();
+                }
+            }
+        }
+
+        /// <summary>
+        /// Is the current reference dock pre-attached ("docked" in the VAB)?
+        /// </summary>
+        /// <returns></returns>
+        public bool DockAttached()
+        {
+            if (vessel == null)
+            {
+                return false;
+            }
+
+            ModuleDockingNode node = InferDockingNode(vessel);
+            if (node != null)
+            {
+                // Urk.  No enums or numerics to test state...
+                return (node.state == "PreAttached");
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Is the current reference dock docked to something?
+        /// </summary>
+        /// <returns></returns>
+        public bool DockDocked()
+        {
+            if (vessel == null)
+            {
+                return false;
+            }
+
+            ModuleDockingNode node = InferDockingNode(vessel);
+            if (node != null)
+            {
+                // Urk.  No enums or numerics to test state...
+                return (node.state == "Docked (docker)") || (node.state == "Docked (dockee)");
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Is the current reference dock ready?
+        /// </summary>
+        /// <returns></returns>
+        public bool DockReady()
+        {
+            if (vessel == null)
+            {
+                return false;
+            }
+
+            ModuleDockingNode node = InferDockingNode(vessel);
+            if (node != null)
+            {
+                // Urk.  No enums or numerics to test state...
+                return (node.state == "Ready");
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Locks / unlocks gimbals on the currently-active stage.
+        /// </summary>
+        /// <param name="state"></param>
+        public void GimbalLock(bool state)
+        {
+            foreach (ModuleGimbal gimbal in FindActiveStageGimbals(vessel))
+            {
+                gimbal.gimbalLock = state;
+            }
+        }
+
+        /// <summary>
+        /// Returns true if at least one gimbal on the active stage is locked.
+        /// </summary>
+        /// <returns></returns>
+        public bool GimbalLockState()
+        {
+            bool gimbalLockState = false;
+
+            if (vessel == null)
+            {
+                return gimbalLockState; // early
+            }
+
+            foreach (ModuleGimbal gimbal in FindActiveStageGimbals(vessel))
+            {
+                if (gimbal.gimbalLock)
+                {
+                    gimbalLockState = true;
+                    break;
+                }
+            }
+
+            return gimbalLockState;
+        }
+
+        public void RadarEnable(bool enabled)
+        {
+            try
+            {
+                List<JSIRadar> radars = vessel.FindPartModulesImplementing<JSIRadar>();
+                for (int i = 0; i < radars.Count; ++i)
+                {
+                    radars[i].radarEnabled = enabled;
+                }
+            }
+            catch { }
+        }
+
+        public bool RadarEnableState()
+        {
+            bool enabled = false;
+
+            try
+            {
+                List<JSIRadar> radars = vessel.FindPartModulesImplementing<JSIRadar>();
+                for(int i=0; i<radars.Count; ++i)
+                {
+                    if(radars[i].radarEnabled)
+                    {
+                        enabled = true;
+                        break;
+                    }
+                }
+            }
+            catch { }
+
+            return enabled;
+        }
+
+        public double GetSASMode()
+        {
+            if(vessel == null)
+            {
+                return 0.0; // StabilityAssist
+            }
+            double mode;
+            switch(vessel.Autopilot.Mode)
+            {
+                case VesselAutopilot.AutopilotMode.StabilityAssist:
+                    mode = 0.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.Prograde:
+                    mode = 1.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.Retrograde:
+                    mode = 2.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.Normal:
+                    mode = 3.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.Antinormal:
+                    mode = 4.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.RadialIn:
+                    mode = 5.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.RadialOut:
+                    mode = 6.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.Target:
+                    mode = 7.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.AntiTarget:
+                    mode = 8.0;
+                    break;
+                case VesselAutopilot.AutopilotMode.Maneuver:
+                    mode = 9.0;
+                    break;
+                default:
+                    mode = 0.0;
+                    break;
+            }
+            return mode;
+        }
+
+        public void SetSASMode(double mode)
+        {
+            int imode = (int)mode;
+            VesselAutopilot.AutopilotMode autopilotMode;
+            switch(imode)
+            {
+                case 0:
+                    autopilotMode = VesselAutopilot.AutopilotMode.StabilityAssist;
+                    break;
+                case 1:
+                    autopilotMode = VesselAutopilot.AutopilotMode.Prograde;
+                    break;
+                case 2:
+                    autopilotMode = VesselAutopilot.AutopilotMode.Retrograde;
+                    break;
+                case 3:
+                    autopilotMode = VesselAutopilot.AutopilotMode.Normal;
+                    break;
+                case 4:
+                    autopilotMode = VesselAutopilot.AutopilotMode.Antinormal;
+                    break;
+                case 5:
+                    autopilotMode = VesselAutopilot.AutopilotMode.RadialIn;
+                    break;
+                case 6:
+                    autopilotMode = VesselAutopilot.AutopilotMode.RadialOut;
+                    break;
+                case 7:
+                    autopilotMode = VesselAutopilot.AutopilotMode.Target;
+                    break;
+                case 8:
+                    autopilotMode = VesselAutopilot.AutopilotMode.AntiTarget;
+                    break;
+                case 9:
+                    autopilotMode = VesselAutopilot.AutopilotMode.Maneuver;
+                    break;
+                default:
+                    JUtil.LogErrorMessage(this, "SetSASMode: attempt to set a SAS mode with the invalid value {0}", imode);
+                    return;
+            }
+
+            if (vessel.Autopilot.CanSetMode(autopilotMode))
+            {
+                vessel.Autopilot.SetMode(autopilotMode);
+                ForceUpdateSASModeToggleButtons(autopilotMode);
+            }
+        }
+
+        /// <summary>
+        /// Infers the docking node this vessel controls
+        /// </summary>
+        /// <param name="vessel"></param>
+        /// <returns></returns>
+        private static ModuleDockingNode InferDockingNode(Vessel vessel)
+        {
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            Part compPart = comp.ReferencePart;
+            uint launchId;
+            if (compPart == null)
+            {
+                launchId = 0u;
+            }
+            else
+            {
+                launchId = compPart.launchID;
+            }
+
+            Part referencePart = vessel.GetReferenceTransformPart();
+            ModuleDockingNode node = referencePart.FindModuleImplementing<ModuleDockingNode>();
+            if (node != null)
+            {
+                //JUtil.LogMessage(vessel, "InferDockingNode: using reference part {0}", referencePart.name);
+                // The current reference part is a docking node.
+                return node;
+            }
+
+            for (int i = 0; i < vessel.parts.Count; ++i)
+            {
+                if (vessel.parts[i].launchID == launchId)
+                {
+                    node = vessel.parts[i].FindModuleImplementing<ModuleDockingNode>();
+                    if (node != null)
+                    {
+                        //JUtil.LogMessage(vessel, "InferDockingNode: found a node on {0}", vessel.parts[i].name);
+                        return node;
+                    }
+                }
+            }
+
+            // We did not find a docking node.
+            return null;
+        }
+
+        /// <summary>
         /// Iterate over the modules in the craft and return all of them that
         /// implement a ModuleGenerator or ModuleResourceConverter that generates 
         /// electricity that can also be shut down.
@@ -654,6 +1005,30 @@ namespace JSI
                                     yield return pm;
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Iterator to find gimbals on active stages
+        /// </summary>
+        /// <param name="vessel"></param>
+        /// <returns></returns>
+        private static IEnumerable<ModuleGimbal> FindActiveStageGimbals(Vessel vessel)
+        {
+            foreach (Part thatPart in vessel.parts)
+            {
+                // MOARdV: I'm not sure inverseStage is ever > CurrentStage,
+                // but there's no harm in >= vs ==.
+                if (thatPart.inverseStage >= Staging.CurrentStage)
+                {
+                    foreach (PartModule pm in thatPart.Modules)
+                    {
+                        if (pm is ModuleGimbal)
+                        {
+                            yield return pm as ModuleGimbal;
                         }
                     }
                 }
