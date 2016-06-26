@@ -18,11 +18,12 @@
  * You should have received a copy of the GNU General Public License
  * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
  ****************************************************************************/
+using KSP.UI.Screens;
 using System;
 using System.Collections.Generic;
-using UnityEngine;
-using System.Reflection;
 using System.Globalization;
+using System.Reflection;
+using UnityEngine;
 
 namespace JSI
 {
@@ -38,13 +39,19 @@ namespace JSI
         public string actionName = "lights";
         [KSPField]
         public string perPodPersistenceName = string.Empty;
+        private bool perPodPersistenceValid = false;
+        [KSPField]
+        public bool perPodPersistenceIsGlobal = false;
         [KSPField]
         public string perPodMasterSwitchName = string.Empty;
+        private bool perPodMasterSwitchValid = false;
         [KSPField]
         public string masterVariableName = string.Empty;
         private VariableOrNumberRange masterVariable = null;
         [KSPField]
         public string masterVariableRange = string.Empty;
+        [KSPField]
+        public bool momentarySwitch = false;
         [KSPField]
         public bool reverse = false;
         [KSPField]
@@ -56,6 +63,9 @@ namespace JSI
         private bool needsElectricChargeValue;
         [KSPField]
         public string resourceName = "SYSR_ELECTRICCHARGE";
+        private bool resourceDepleted = false; // Managed by rpmComp callback
+        private Action<bool> del;
+
         [KSPField]
         public string switchSound = "Squad/Sounds/sound_click_flick";
         [KSPField]
@@ -68,6 +78,7 @@ namespace JSI
         public string coloredObject = string.Empty;
         [KSPField]
         public string colorName = "_EmissiveColor";
+        private int colorNameId = -1;
         [KSPField]
         public string consumeOnToggle = string.Empty;
         [KSPField]
@@ -111,7 +122,10 @@ namespace JSI
             Dummy,
             Plugin,
             Stage,
-            Transfer
+            Transfer,
+            TransferToPersistent,
+            TransferFromPersistent,
+            TransferFromVariable
         };
         private bool customGroupState = false;
         internal static readonly Dictionary<string, CustomActions> customGroupList = new Dictionary<string, CustomActions> {
@@ -128,18 +142,18 @@ namespace JSI
         private bool currentState;
         private bool isCustomAction;
         private string persistentVarName;
+        private bool persistentVarValid = false;
         private Light[] lightObjects;
         private FXGroup audioOutput;
         private FXGroup loopingOutput;
-        private int lightCheckCountdown;
-        private RasterPropMonitorComputer rpmComp;
         private bool startupComplete;
-        private Renderer colorShiftRenderer;
-        private string stateVariable = string.Empty;
+        private Material colorShiftMaterial;
+        private VariableOrNumber stateVariable;
         private Action<bool> actionHandler;
         private bool isPluginAction;
+        private RasterPropMonitorComputer rpmComp;
 
-        private string transferGetter = string.Empty;
+        private VariableOrNumber transferGetter;
         private Action<double> transferSetter;
         private string transferPersistentName;
 
@@ -161,7 +175,7 @@ namespace JSI
 
             try
             {
-                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
 
                 if (!groupList.ContainsKey(actionName) && !customGroupList.ContainsKey(actionName))
                 {
@@ -255,12 +269,38 @@ namespace JSI
                     {
                         case "intlight":
                             persistentVarName = internalLightName;
-                            lightObjects = internalModel.FindModelComponents<Light>();
-                            needsElectricChargeValue |= string.IsNullOrEmpty(needsElectricCharge) || needsElectricChargeValue;
+                            if (!string.IsNullOrEmpty(internalLightName))
+                            {
+                                Light[] availableLights = internalModel.FindModelComponents<Light>();
+                                if (availableLights != null && availableLights.Length > 0)
+                                {
+                                    List<Light> lights = new List<Light>(availableLights);
+                                    for (int i = lights.Count - 1; i >= 0; --i)
+                                    {
+                                        if (lights[i].name != internalLightName)
+                                        {
+                                            lights.RemoveAt(i);
+                                        }
+                                    }
+                                    if (lights.Count > 0)
+                                    {
+                                        lightObjects = lights.ToArray();
+                                        needsElectricChargeValue |= string.IsNullOrEmpty(needsElectricCharge) || needsElectricChargeValue;
+                                    }
+                                    else
+                                    {
+                                        actionName = "dummy";
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                actionName = "dummy";
+                            }
                             break;
                         case "plugin":
                             persistentVarName = string.Empty;
-                            comp.UpdateDataRefreshRate(refreshRate);
+                            rpmComp.UpdateDataRefreshRate(refreshRate);
 
                             foreach (ConfigNode node in GameDatabase.Instance.GetConfigNodes("PROP"))
                             {
@@ -271,7 +311,7 @@ namespace JSI
                                         if (pluginConfig.HasValue("name") && pluginConfig.HasValue("actionMethod"))
                                         {
                                             string action = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("actionMethod").Trim();
-                                            actionHandler = (Action<bool>)comp.GetMethod(action, internalProp, typeof(Action<bool>));
+                                            actionHandler = (Action<bool>)rpmComp.GetMethod(action, internalProp, typeof(Action<bool>));
 
                                             if (actionHandler == null)
                                             {
@@ -282,11 +322,11 @@ namespace JSI
                                                 if (pluginConfig.HasValue("stateMethod"))
                                                 {
                                                     string state = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("stateMethod").Trim();
-                                                    stateVariable = "PLUGIN_" + state;
+                                                    stateVariable = rpmComp.InstantiateVariableOrNumber("PLUGIN_" + state);
                                                 }
                                                 else if (pluginConfig.HasValue("stateVariable"))
                                                 {
-                                                    stateVariable = pluginConfig.GetValue("stateVariable").Trim();
+                                                    stateVariable = rpmComp.InstantiateVariableOrNumber(pluginConfig.GetValue("stateVariable").Trim());
                                                 }
                                                 isPluginAction = true;
                                                 break;
@@ -303,7 +343,7 @@ namespace JSI
                             break;
                         case "transfer":
                             persistentVarName = string.Empty;
-                            comp.UpdateDataRefreshRate(refreshRate);
+                            rpmComp.UpdateDataRefreshRate(refreshRate);
 
                             foreach (ConfigNode node in GameDatabase.Instance.GetConfigNodes("PROP"))
                             {
@@ -311,61 +351,93 @@ namespace JSI
                                 {
                                     foreach (ConfigNode pluginConfig in node.GetNodes("MODULE")[moduleID].GetNodes("TRANSFERACTION"))
                                     {
-                                        if ((pluginConfig.HasValue("name") || pluginConfig.HasValue("getVariable")) && pluginConfig.HasValue("perPodPersistenceName"))
+                                        if (pluginConfig.HasValue("name") || pluginConfig.HasValue("getVariable"))
                                         {
-                                            transferPersistentName = pluginConfig.GetValue("perPodPersistenceName").Trim();
                                             if (pluginConfig.HasValue("stateMethod"))
                                             {
                                                 string state = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("stateMethod").Trim();
-                                                stateVariable = "PLUGIN_" + state;
+                                                stateVariable = rpmComp.InstantiateVariableOrNumber("PLUGIN_" + state);
                                             }
                                             else if (pluginConfig.HasValue("stateVariable"))
                                             {
-                                                stateVariable = pluginConfig.GetValue("stateVariable").Trim();
+                                                stateVariable = rpmComp.InstantiateVariableOrNumber(pluginConfig.GetValue("stateVariable").Trim());
                                             }
                                             if (pluginConfig.HasValue("setMethod"))
                                             {
                                                 string action = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("setMethod").Trim();
-                                                transferSetter = (Action<double>)comp.GetMethod(action, internalProp, typeof(Action<double>));
+                                                transferSetter = (Action<double>)rpmComp.GetMethod(action, internalProp, typeof(Action<double>));
 
                                                 if (transferSetter == null)
                                                 {
                                                     JUtil.LogErrorMessage(this, "Failed to instantiate transfer handler {0}", pluginConfig.GetValue("name"));
                                                 }
+                                                else if (pluginConfig.HasValue("perPodPersistenceName"))
+                                                {
+                                                    transferPersistentName = pluginConfig.GetValue("perPodPersistenceName").Trim();
+                                                    actionName = "transferFromPersistent";
+                                                    customAction = CustomActions.TransferFromPersistent;
+                                                }
+                                                else if (pluginConfig.HasValue("getVariable"))
+                                                {
+                                                    transferGetter = rpmComp.InstantiateVariableOrNumber(pluginConfig.GetValue("getVariable").Trim());
+                                                    actionName = "transferFromVariable";
+                                                    customAction = CustomActions.TransferFromVariable;
+                                                }
                                                 else
                                                 {
+                                                    JUtil.LogErrorMessage(this, "Unable to configure transfer setter method in {0} - no perPodPersistenceName or getVariable", internalProp.name);
+                                                    transferSetter = null;
                                                     //JUtil.LogMessage(this, "Got setter {0}", action);
-                                                    break;
                                                 }
                                             }
                                             else if (pluginConfig.HasValue("getMethod"))
                                             {
-                                                string action = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("getMethod").Trim();
-                                                var getter = (Func<double>)comp.GetMethod(action, internalProp, typeof(Func<double>));
-
-                                                if (getter == null)
+                                                if (pluginConfig.HasValue("perPodPersistenceName"))
                                                 {
-                                                    JUtil.LogErrorMessage(this, "Failed to instantiate transfer handler {0}", pluginConfig.GetValue("name"));
+                                                    string action = pluginConfig.GetValue("name").Trim() + ":" + pluginConfig.GetValue("getMethod").Trim();
+                                                    var getter = (Func<double>)rpmComp.GetMethod(action, internalProp, typeof(Func<double>));
+
+                                                    if (getter == null)
+                                                    {
+                                                        JUtil.LogErrorMessage(this, "Failed to instantiate transfer handler {0} in {1}", pluginConfig.GetValue("name"), internalProp.name);
+                                                    }
+                                                    else
+                                                    {
+                                                        transferGetter = rpmComp.InstantiateVariableOrNumber("PLUGIN_" + action);
+                                                        transferPersistentName = pluginConfig.GetValue("perPodPersistenceName").Trim();
+                                                        actionName = "transferToPersistent";
+                                                        customAction = CustomActions.TransferToPersistent;
+                                                        //JUtil.LogMessage(this, "Got getter {0}", action);
+                                                        break;
+                                                    }
                                                 }
                                                 else
                                                 {
-                                                    transferGetter = "PLUGIN_" + action;
-                                                    //JUtil.LogMessage(this, "Got getter {0}", action);
-                                                    break;
+                                                    JUtil.LogErrorMessage(this, "Transfer handler in {0} configured with 'getVariable', but no 'perPodPeristenceName'", internalProp.name);
                                                 }
                                             }
                                             else if (pluginConfig.HasValue("getVariable"))
                                             {
-                                                transferGetter = pluginConfig.GetValue("getVariable").Trim();
+                                                if (pluginConfig.HasValue("perPodPersistenceName"))
+                                                {
+                                                    transferGetter = rpmComp.InstantiateVariableOrNumber(pluginConfig.GetValue("getVariable").Trim());
+                                                    transferPersistentName = pluginConfig.GetValue("perPodPersistenceName").Trim();
+                                                    actionName = "transferToPersistent";
+                                                    customAction = CustomActions.TransferToPersistent;
+                                                }
+                                                else
+                                                {
+                                                    JUtil.LogErrorMessage(this, "Transfer handler in {0} configured with 'getVariable', but no 'perPodPeristenceName'", internalProp.name);
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
-                            if (string.IsNullOrEmpty(transferGetter) && transferSetter == null)
+                            if (transferGetter == null && transferSetter == null)
                             {
                                 actionName = "dummy";
-                                stateVariable = string.Empty;
+                                stateVariable = null;
                                 JUtil.LogMessage(this, "Transfer handlers did not start, reverting to dummy mode.");
                             }
                             break;
@@ -382,26 +454,28 @@ namespace JSI
                         // If there's no persistence name, there's no valid group id for this switch
                         switchGroupIdentifier = -1;
                     }
+
+                    persistentVarValid = !string.IsNullOrEmpty(persistentVarName);
                 }
+
+                perPodPersistenceValid = !string.IsNullOrEmpty(perPodPersistenceName);
 
                 if (customGroupList.ContainsKey(actionName))
                 {
                     customAction = customGroupList[actionName];
                 }
 
-                if (needsElectricChargeValue || !string.IsNullOrEmpty(persistentVarName) || !string.IsNullOrEmpty(perPodMasterSwitchName) || !string.IsNullOrEmpty(masterVariableName) ||
-                    !string.IsNullOrEmpty(transferGetter) || transferSetter != null)
+                if (needsElectricChargeValue || persistentVarValid || !string.IsNullOrEmpty(perPodMasterSwitchName) || !string.IsNullOrEmpty(masterVariableName) ||
+                    transferGetter != null || transferSetter != null)
                 {
-                    rpmComp = RasterPropMonitorComputer.Instantiate(internalProp);
-
-                    comp.UpdateDataRefreshRate(refreshRate);
+                    rpmComp.UpdateDataRefreshRate(refreshRate);
 
                     if (!string.IsNullOrEmpty(masterVariableName))
                     {
                         string[] range = masterVariableRange.Split(',');
                         if (range.Length == 2)
                         {
-                            masterVariable = new VariableOrNumberRange(masterVariableName, range[0], range[1]);
+                            masterVariable = new VariableOrNumberRange(rpmComp, masterVariableName, range[0], range[1]);
                         }
                         else
                         {
@@ -410,38 +484,44 @@ namespace JSI
                     }
                 }
 
+                if (needsElectricChargeValue)
+                {
+                    del = (Action<bool>)Delegate.CreateDelegate(typeof(Action<bool>), this, "ResourceDepletedCallback");
+                    rpmComp.RegisterResourceCallback(resourceName, del);
+                }
+
                 // set up the toggle switch
                 if (!string.IsNullOrEmpty(switchTransform))
                 {
-                    SmarterButton.CreateButton(internalProp, switchTransform, Click);
+                    if (momentarySwitch)
+                    {
+                        SmarterButton.CreateButton(internalProp, switchTransform, Click, Click);
+                    }
+                    else
+                    {
+                        SmarterButton.CreateButton(internalProp, switchTransform, Click);
+                    }
                 }
 
                 if (isCustomAction)
                 {
-                    if (isPluginAction && !string.IsNullOrEmpty(stateVariable))
+                    if (isPluginAction && stateVariable != null)
                     {
-                        try
-                        {
-                            currentState = (comp.ProcessVariable(stateVariable, -1).MassageToInt()) > 0;
-                        }
-                        catch
-                        {
-                            // no-op
-                        }
+                        currentState = stateVariable.AsInt() > 0;
                     }
                     else
                     {
-                        if (rpmComp != null && !string.IsNullOrEmpty(persistentVarName))
+                        if (persistentVarValid)
                         {
                             if (switchGroupIdentifier >= 0)
                             {
-                                int activeSwitch = rpmComp.GetVar(persistentVarName, 0);
+                                int activeSwitch = rpmComp.GetPersistentVariable(persistentVarName, 0, perPodPersistenceIsGlobal).MassageToInt();
 
                                 currentState = customGroupState = (switchGroupIdentifier == activeSwitch);
                             }
                             else
                             {
-                                currentState = customGroupState = rpmComp.GetBool(persistentVarName, initialState);
+                                currentState = customGroupState = rpmComp.GetPersistentVariable(persistentVarName, initialState, perPodPersistenceIsGlobal);
                             }
 
                             if (customAction == CustomActions.IntLight)
@@ -454,18 +534,18 @@ namespace JSI
                     }
                 }
 
-                if (rpmComp != null && !rpmComp.HasVar(persistentVarName))
+                if (persistentVarValid && !rpmComp.HasPersistentVariable(persistentVarName, perPodPersistenceIsGlobal))
                 {
                     if (switchGroupIdentifier >= 0)
                     {
                         if (currentState)
                         {
-                            rpmComp.SetVar(persistentVarName, switchGroupIdentifier);
+                            rpmComp.SetPersistentVariable(persistentVarName, switchGroupIdentifier, perPodPersistenceIsGlobal);
                         }
                     }
                     else
                     {
-                        rpmComp.SetVar(persistentVarName, currentState);
+                        rpmComp.SetPersistentVariable(persistentVarName, currentState, perPodPersistenceIsGlobal);
                     }
                 }
 
@@ -501,10 +581,12 @@ namespace JSI
                 else if (!string.IsNullOrEmpty(coloredObject))
                 {
                     // Set up the color shift.
-                    colorShiftRenderer = internalProp.FindModelComponent<Renderer>(coloredObject);
-                    disabledColorValue = ConfigNode.ParseColor32(disabledColor);
-                    enabledColorValue = ConfigNode.ParseColor32(enabledColor);
-                    colorShiftRenderer.material.SetColor(colorName, (currentState ^ reverse ? enabledColorValue : disabledColorValue));
+                    Renderer colorShiftRenderer = internalProp.FindModelComponent<Renderer>(coloredObject);
+                    disabledColorValue = JUtil.ParseColor32(disabledColor, part, ref rpmComp);
+                    enabledColorValue = JUtil.ParseColor32(enabledColor, part, ref rpmComp);
+                    colorShiftMaterial = colorShiftRenderer.material;
+                    colorNameId = Shader.PropertyToID(colorName);
+                    colorShiftMaterial.SetColor(colorNameId, (currentState ^ reverse ? enabledColorValue : disabledColorValue));
                 }
                 else
                 {
@@ -518,48 +600,61 @@ namespace JSI
                     loopingOutput = JUtil.SetupIVASound(internalProp, loopingSound, loopingSoundVolume, true);
                 }
 
+                perPodMasterSwitchValid = !string.IsNullOrEmpty(perPodMasterSwitchName);
+
+                JUtil.LogMessage(this, "Configuration complete in prop {0} ({1}).", internalProp.propID, internalProp.propName);
+
                 startupComplete = true;
             }
-            catch
+            catch (Exception e)
             {
+                JUtil.LogErrorMessage(this, "Exception configuring prop {0} ({1}): {2}", internalProp.propID, internalProp.propName, e);
                 JUtil.AnnoyUser(this);
                 enabled = false;
-                throw;
             }
         }
 
         public void OnDestroy()
         {
             //JUtil.LogMessage(this, "OnDestroy()");
-            rpmComp = null;
+            if (colorShiftMaterial != null)
+            {
+                UnityEngine.Object.Destroy(colorShiftMaterial);
+                colorShiftMaterial = null;
+            }
+            actionHandler = null;
+            transferGetter = null;
+            transferSetter = null;
+            audioOutput = null;
+            loopingOutput = null;
+
+            if (del != null)
+            {
+                rpmComp.UnregisterResourceCallback(resourceName, del);
+            }
         }
 
         private void SetInternalLights(bool value)
         {
-            foreach (Light lightobject in lightObjects)
+            for (int i = 0; i < lightObjects.Length; ++i)
             {
-                // I probably shouldn't filter them every time, but I am getting
-                // serously confused by this hierarchy.
-                if (lightobject.name == internalLightName)
-                {
-                    lightobject.enabled = value;
-                }
+                lightObjects[i].enabled = value;
             }
         }
 
         public void Click()
         {
             bool switchEnabled = true;
+
             if (!forcedShutdown)
             {
-                if (!string.IsNullOrEmpty(perPodMasterSwitchName))
+                if (perPodMasterSwitchValid)
                 {
-                    switchEnabled = rpmComp.GetBool(perPodMasterSwitchName, false);
+                    switchEnabled = rpmComp.GetPersistentVariable(perPodMasterSwitchName, false, false);
                 }
                 if (masterVariable != null)
                 {
-                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                    switchEnabled = masterVariable.IsInRange(comp);
+                    switchEnabled = masterVariable.IsInRange();
                 }
             }
             if (!switchEnabled)
@@ -577,25 +672,24 @@ namespace JSI
                     if (!forcedShutdown && !customGroupState)
                     {
                         customGroupState = true;
-                        if (!string.IsNullOrEmpty(persistentVarName))
+                        if (persistentVarValid)
                         {
-                            rpmComp.SetVar(persistentVarName, switchGroupIdentifier);
+                            rpmComp.SetPersistentVariable(persistentVarName, switchGroupIdentifier, perPodPersistenceIsGlobal);
                         }
                     }
                     // else: can't turn off a radio group switch.
                 }
-                else if (customAction == CustomActions.Plugin && !string.IsNullOrEmpty(stateVariable))
+                else if (customAction == CustomActions.Plugin && stateVariable != null)
                 {
-                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                    int ivalue = comp.ProcessVariable(stateVariable, -1).MassageToInt();
+                    int ivalue = stateVariable.AsInt();
                     customGroupState = (ivalue < 1) && !forcedShutdown;
                 }
                 else
                 {
                     customGroupState = !customGroupState;
-                    if (!string.IsNullOrEmpty(persistentVarName))
+                    if (persistentVarValid)
                     {
-                        rpmComp.SetVar(persistentVarName, customGroupState);
+                        rpmComp.SetPersistentVariable(persistentVarName, customGroupState, perPodPersistenceIsGlobal);
                     }
                 }
             }
@@ -603,6 +697,7 @@ namespace JSI
             {
                 vessel.ActionGroups.ToggleGroup(kspAction);
             }
+
             // Now we do extra things that with regular actions can't happen.
             switch (customAction)
             {
@@ -615,30 +710,49 @@ namespace JSI
                 case CustomActions.Stage:
                     if (InputLockManager.IsUnlocked(ControlTypes.STAGING))
                     {
-                        Staging.ActivateNextStage();
+                        StageManager.ActivateNextStage();
                     }
                     break;
-                case CustomActions.Transfer:
-                    if (!string.IsNullOrEmpty(stateVariable))
+                case CustomActions.TransferToPersistent:
+                    if (stateVariable != null)
                     {
                         // stateVariable can disable the button functionality.
-                        RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                        int ivalue = comp.ProcessVariable(stateVariable, -1).MassageToInt();
+                        int ivalue = stateVariable.AsInt();
                         if (ivalue < 1)
                         {
                             return; // early - button disabled
                         }
                     }
-                    if (!string.IsNullOrEmpty(transferGetter))
+                    float getValue = transferGetter.AsFloat();
+                    rpmComp.SetPersistentVariable(transferPersistentName, getValue, false);
+                    break;
+                case CustomActions.TransferFromPersistent:
+                    if (stateVariable != null)
                     {
-                        RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                        float value = comp.ProcessVariable(transferGetter, internalProp.propID).MassageToFloat();
-                        rpmComp.SetVar(transferPersistentName, (int)value);
+                        // stateVariable can disable the button functionality.
+                        int ivalue = stateVariable.AsInt();
+                        if (ivalue < 1)
+                        {
+                            return; // early - button disabled
+                        }
                     }
-                    else if (rpmComp.HasVar(transferPersistentName))
+                    if (rpmComp.HasPersistentVariable(transferPersistentName, false))
                     {
-                        transferSetter((double)rpmComp.GetVar(transferPersistentName));
+                        transferSetter(rpmComp.GetPersistentVariable(transferPersistentName, 0.0, false).MassageToDouble());
                     }
+                    break;
+                case CustomActions.TransferFromVariable:
+                    if (stateVariable != null)
+                    {
+                        // stateVariable can disable the button functionality.
+                        int ivalue = stateVariable.AsInt();
+                        if (ivalue < 1)
+                        {
+                            return; // early - button disabled
+                        }
+                    }
+                    double xferValue = transferGetter.AsDouble();
+                    transferSetter(xferValue);
                     break;
             }
         }
@@ -684,12 +798,11 @@ namespace JSI
             // So there's no check for internal cameras.
 
             bool newState;
-            if (isPluginAction && !string.IsNullOrEmpty(stateVariable))
+            if (isPluginAction && stateVariable != null)
             {
                 try
                 {
-                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                    newState = (comp.ProcessVariable(stateVariable, -1).MassageToInt()) > 0;
+                    newState = (stateVariable.AsInt()) > 0;
                 }
                 catch
                 {
@@ -698,34 +811,34 @@ namespace JSI
             }
             else if (isCustomAction)
             {
-                if (string.IsNullOrEmpty(switchTransform) && !string.IsNullOrEmpty(perPodPersistenceName))
+                if (string.IsNullOrEmpty(switchTransform) && perPodPersistenceValid)
                 {
                     if (switchGroupIdentifier >= 0)
                     {
-                        int activeGroupId = rpmComp.GetVar(persistentVarName, 0);
+                        int activeGroupId = rpmComp.GetPersistentVariable(persistentVarName, 0, perPodPersistenceIsGlobal).MassageToInt();
                         newState = (switchGroupIdentifier == activeGroupId);
                         customGroupState = newState;
                     }
                     else
                     {
                         // If the switch transform is not given, and the global comp.Persistence value is, this means this is a slave module.
-                        newState = rpmComp.GetBool(persistentVarName, false);
+                        newState = rpmComp.GetPersistentVariable(persistentVarName, false, perPodPersistenceIsGlobal);
                     }
                 }
                 else
                 {
                     // Otherwise it's a master module. But it still might have to follow the clicks on other copies of the same prop...
-                    if (!string.IsNullOrEmpty(perPodPersistenceName))
+                    if (perPodPersistenceValid)
                     {
                         if (switchGroupIdentifier >= 0)
                         {
-                            int activeGroupId = rpmComp.GetVar(persistentVarName, 0);
+                            int activeGroupId = rpmComp.GetPersistentVariable(persistentVarName, 0, perPodPersistenceIsGlobal).MassageToInt();
                             newState = (switchGroupIdentifier == activeGroupId);
                             customGroupState = newState;
                         }
                         else
                         {
-                            newState = rpmComp.GetBool(persistentVarName, customGroupState);
+                            newState = rpmComp.GetPersistentVariable(persistentVarName, customGroupState, perPodPersistenceIsGlobal);
                         }
                     }
                     else
@@ -742,18 +855,12 @@ namespace JSI
             // If needsElectricCharge is true and there is no charge, the state value is overridden to false and the click action is reexecuted.
             if (needsElectricChargeValue)
             {
-                lightCheckCountdown--;
-                if (lightCheckCountdown <= 0)
-                {
-                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                    lightCheckCountdown = refreshRate;
-                    forcedShutdown |= currentState && comp.ProcessVariable(resourceName).MassageToFloat() < 0.01f;
-                }
+                forcedShutdown |= resourceDepleted;
             }
 
-            if (!string.IsNullOrEmpty(perPodMasterSwitchName))
+            if (perPodMasterSwitchValid)
             {
-                bool switchEnabled = rpmComp.GetBool(perPodMasterSwitchName, false);
+                bool switchEnabled = rpmComp.GetPersistentVariable(perPodMasterSwitchName, false, false);
                 if (!switchEnabled)
                 {
                     // If the master switch is 'off', this switch needs to turn off
@@ -764,8 +871,7 @@ namespace JSI
 
             if (masterVariable != null)
             {
-                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                if (!masterVariable.IsInRange(comp))
+                if (!masterVariable.IsInRange())
                 {
                     newState = false;
                     forcedShutdown = true;
@@ -830,13 +936,24 @@ namespace JSI
                         anim.Play(animationName);
                     }
                 }
-                else if (colorShiftRenderer != null)
+                else if (colorShiftMaterial != null)
                 {
-                    colorShiftRenderer.material.SetColor(colorName, (newState ^ reverse ? enabledColorValue : disabledColorValue));
+                    colorShiftMaterial.SetColor(colorNameId, (newState ^ reverse ? enabledColorValue : disabledColorValue));
                 }
                 currentState = newState;
             }
         }
 
+        /// <summary>
+        /// This little callback allows RasterPropMonitorComputer to notify
+        /// this module when its required resource has gone above or below the
+        /// arbitrary and hard-coded threshold of 0.01, so that each switch is
+        /// not forced to query every update "How much power is there?".
+        /// </summary>
+        /// <param name="newValue"></param>
+        void ResourceDepletedCallback(bool newValue)
+        {
+            resourceDepleted = newValue;
+        }
     }
 }

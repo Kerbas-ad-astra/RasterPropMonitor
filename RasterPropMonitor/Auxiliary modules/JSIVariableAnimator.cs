@@ -32,6 +32,8 @@ namespace JSI
         private int updateCountdown;
         private readonly List<VariableAnimationSet> variableSets = new List<VariableAnimationSet>();
         private bool alwaysActive;
+        private bool muted = false;
+        private RasterPropMonitorComputer rpmComp;
 
         private bool UpdateCheck()
         {
@@ -53,6 +55,8 @@ namespace JSI
 
             try
             {
+                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
+
                 ConfigNode moduleConfig = null;
                 foreach (ConfigNode node in GameDatabase.Instance.GetConfigNodes("PROP"))
                 {
@@ -66,7 +70,7 @@ namespace JSI
                         {
                             try
                             {
-                                variableSets.Add(new VariableAnimationSet(variableNodes[i], internalProp));
+                                variableSets.Add(new VariableAnimationSet(variableNodes[i], internalProp, rpmComp));
                             }
                             catch (ArgumentException e)
                             {
@@ -82,7 +86,7 @@ namespace JSI
                 {
                     try
                     {
-                        variableSets.Add(new VariableAnimationSet(moduleConfig, internalProp));
+                        variableSets.Add(new VariableAnimationSet(moduleConfig, internalProp, rpmComp));
                     }
                     catch (ArgumentException e)
                     {
@@ -90,14 +94,14 @@ namespace JSI
                     }
                 }
 
-                JUtil.LogMessage(this, "Configuration complete in prop {1}, supporting {0} variable indicators.", variableSets.Count, internalProp.propID);
+                JUtil.LogMessage(this, "Configuration complete in prop {1} ({2}), supporting {0} variable indicators.", variableSets.Count, internalProp.propID, internalProp.propName);
 
                 foreach (VariableAnimationSet thatSet in variableSets)
                 {
                     alwaysActive |= thatSet.alwaysActive;
                 }
-                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                comp.UpdateDataRefreshRate(refreshRate);
+
+                rpmComp.UpdateDataRefreshRate(refreshRate);
                 startupComplete = true;
             }
             catch
@@ -111,44 +115,60 @@ namespace JSI
         public void OnDestroy()
         {
             //JUtil.LogMessage(this, "OnDestroy()");
+            for (int i = 0; i < variableSets.Count; ++i)
+            {
+                variableSets[i].TearDown();
+            }
+            variableSets.Clear();
         }
 
         public void Update()
         {
-            if (!JUtil.IsActiveVessel(vessel))
+            if (!JUtil.IsActiveVessel(vessel) || !startupComplete)
             {
                 return;
             }
 
             if (!JUtil.VesselIsInIVA(vessel))
             {
+                if (!muted)
+                {
+                    for (int unit = 0; unit < variableSets.Count; ++unit)
+                    {
+                        variableSets[unit].MuteSoundWhileOutOfIVA();
+                    }
+                }
+                muted = true;
+            }
+            else if (muted)
+            {
                 for (int unit = 0; unit < variableSets.Count; ++unit)
                 {
-                    variableSets[unit].MuteSoundWhileOutOfIVA();
+                    variableSets[unit].UnmuteSoundWhileInIVA();
                 }
+                muted = false;
             }
 
-            if ((!alwaysActive && !JUtil.VesselIsInIVA(vessel)) || !UpdateCheck())
+            if ((!alwaysActive && !JUtil.RasterPropMonitorShouldUpdate(vessel)) || !UpdateCheck())
             {
                 return;
             }
 
-            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
             double universalTime = Planetarium.GetUniversalTime();
             for (int unit = 0; unit < variableSets.Count; ++unit)
             {
-                variableSets[unit].Update(comp, universalTime);
+                variableSets[unit].Update(universalTime);
             }
         }
 
-        public void LateUpdate()
-        {
-            if (vessel != null && JUtil.VesselIsInIVA(vessel) && !startupComplete)
-            {
-                JUtil.AnnoyUser(this);
-                enabled = false;
-            }
-        }
+        //public void LateUpdate()
+        //{
+        //    if (vessel != null && JUtil.VesselIsInIVA(vessel) && !startupComplete)
+        //    {
+        //        JUtil.AnnoyUser(this);
+        //        enabled = false;
+        //    }
+        //}
     }
 
     public class VariableAnimationSet
@@ -161,22 +181,22 @@ namespace JSI
         private readonly float alarmSoundVolume;
         private readonly Vector2 threshold = Vector2.zero;
         private readonly bool reverse;
+        private readonly bool usesModulo;
         private readonly string animationName;
         private readonly string stopAnimationName;
         private readonly float animationSpeed;
         private readonly bool alarmSoundLooping;
         private readonly bool alarmMustPlayOnce;
         private readonly Color passiveColor, activeColor;
-        private readonly Renderer colorShiftRenderer;
-        private readonly Transform controlledTransform;
+        private Transform controlledTransform;
         private readonly Vector3 initialPosition, initialScale, vectorStart, vectorEnd;
         private readonly Quaternion initialRotation, rotationStart, rotationEnd;
         private readonly bool longPath;
         private readonly double flashingDelay;
-        private readonly string colorName = "_EmissiveColor";
+        private readonly int colorName = -1;
         private readonly Vector2 textureShiftStart, textureShiftEnd, textureScaleStart, textureScaleEnd;
-        private readonly Material affectedMaterial;
-        private readonly string textureLayer;
+        private Material affectedMaterial;
+        private List<string> textureLayer = new List<string>();
         private readonly Mode mode;
         private readonly float resourceAmount;
         private readonly string resourceName;
@@ -208,7 +228,7 @@ namespace JSI
         // I haven't seen conclusive signs of destructors working in child
         // objects like this, so do I need a manual method?  Or make it a MonoBehavior
         // with only the OnDestroy implemented?
-        public VariableAnimationSet(ConfigNode node, InternalProp thisProp)
+        public VariableAnimationSet(ConfigNode node, InternalProp thisProp, RasterPropMonitorComputer rpmComp)
         {
             part = thisProp.part;
 
@@ -236,10 +256,9 @@ namespace JSI
             }
             else if (node.HasValue("stateMethod"))
             {
-                RPMVesselComputer comp = RPMVesselComputer.Instance(part.vessel);
                 string stateMethod = node.GetValue("stateMethod").Trim();
                 // Verify the state method actually exists
-                Func<bool> stateFunction = (Func<bool>)comp.GetMethod(stateMethod, thisProp, typeof(Func<bool>));
+                Func<bool> stateFunction = (Func<bool>)rpmComp.GetMethod(stateMethod, thisProp, typeof(Func<bool>));
                 if (stateFunction != null)
                 {
                     variableName = "PLUGIN_" + stateMethod;
@@ -254,7 +273,16 @@ namespace JSI
                 throw new ArgumentException("Missing variable name.");
             }
 
-            variable = new VariableOrNumberRange(variableName, tokens[0], tokens[1]);
+            if (node.HasValue("modulo"))
+            {
+                variable = new VariableOrNumberRange(rpmComp, variableName, tokens[0], tokens[1], node.GetValue("modulo"));
+                usesModulo = true;
+            }
+            else
+            {
+                variable = new VariableOrNumberRange(rpmComp, variableName, tokens[0], tokens[1]);
+                usesModulo = false;
+            }
 
             // That takes care of the scale, now what to do about that scale:
             if (node.HasValue("reverse"))
@@ -336,16 +364,26 @@ namespace JSI
             }
             else if (node.HasValue("activeColor") && node.HasValue("passiveColor") && node.HasValue("coloredObject"))
             {
+                string colorNameString = "_EmissiveColor";
                 if (node.HasValue("colorName"))
                 {
-                    colorName = node.GetValue("colorName");
+                    colorNameString = node.GetValue("colorName");
                 }
-                passiveColor = ConfigNode.ParseColor32(node.GetValue("passiveColor"));
-                activeColor = ConfigNode.ParseColor32(node.GetValue("activeColor"));
-                Vector4 range = (activeColor - passiveColor);
-                float maxRange = Mathf.Max(Mathf.Abs(range.x), Mathf.Abs(range.y), Mathf.Abs(range.z), Mathf.Abs(range.w));
-                colorShiftRenderer = thisProp.FindModelComponent<Renderer>(node.GetValue("coloredObject"));
-                colorShiftRenderer.material.SetColor(colorName, reverse ? activeColor : passiveColor);
+                colorName = Shader.PropertyToID(colorNameString);
+
+                if (reverse)
+                {
+                    activeColor = JUtil.ParseColor32(node.GetValue("passiveColor"), thisProp.part, ref rpmComp);
+                    passiveColor = JUtil.ParseColor32(node.GetValue("activeColor"), thisProp.part, ref rpmComp);
+                }
+                else
+                {
+                    passiveColor = JUtil.ParseColor32(node.GetValue("passiveColor"), thisProp.part, ref rpmComp);
+                    activeColor = JUtil.ParseColor32(node.GetValue("activeColor"), thisProp.part, ref rpmComp);
+                }
+                Renderer colorShiftRenderer = thisProp.FindModelComponent<Renderer>(node.GetValue("coloredObject"));
+                affectedMaterial = colorShiftRenderer.material;
+                affectedMaterial.SetColor(colorName, passiveColor);
                 mode = Mode.Color;
             }
             else if (node.HasValue("controlledTransform") && node.HasValue("localRotationStart") && node.HasValue("localRotationEnd"))
@@ -355,13 +393,29 @@ namespace JSI
                 if (node.HasValue("longPath"))
                 {
                     longPath = true;
-                    vectorStart = ConfigNode.ParseVector3(node.GetValue("localRotationStart"));
-                    vectorEnd = ConfigNode.ParseVector3(node.GetValue("localRotationEnd"));
+                    if (reverse)
+                    {
+                        vectorEnd = ConfigNode.ParseVector3(node.GetValue("localRotationStart"));
+                        vectorStart = ConfigNode.ParseVector3(node.GetValue("localRotationEnd"));
+                    }
+                    else
+                    {
+                        vectorStart = ConfigNode.ParseVector3(node.GetValue("localRotationStart"));
+                        vectorEnd = ConfigNode.ParseVector3(node.GetValue("localRotationEnd"));
+                    }
                 }
                 else
                 {
-                    rotationStart = Quaternion.Euler(ConfigNode.ParseVector3(node.GetValue("localRotationStart")));
-                    rotationEnd = Quaternion.Euler(ConfigNode.ParseVector3(node.GetValue("localRotationEnd")));
+                    if (reverse)
+                    {
+                        rotationEnd = Quaternion.Euler(ConfigNode.ParseVector3(node.GetValue("localRotationStart")));
+                        rotationStart = Quaternion.Euler(ConfigNode.ParseVector3(node.GetValue("localRotationEnd")));
+                    }
+                    else
+                    {
+                        rotationStart = Quaternion.Euler(ConfigNode.ParseVector3(node.GetValue("localRotationStart")));
+                        rotationEnd = Quaternion.Euler(ConfigNode.ParseVector3(node.GetValue("localRotationEnd")));
+                    }
                 }
                 mode = Mode.Rotation;
             }
@@ -369,32 +423,74 @@ namespace JSI
             {
                 controlledTransform = thisProp.FindModelTransform(node.GetValue("controlledTransform").Trim());
                 initialPosition = controlledTransform.localPosition;
-                vectorStart = ConfigNode.ParseVector3(node.GetValue("localTranslationStart"));
-                vectorEnd = ConfigNode.ParseVector3(node.GetValue("localTranslationEnd"));
+                if (reverse)
+                {
+                    vectorEnd = ConfigNode.ParseVector3(node.GetValue("localTranslationStart"));
+                    vectorStart = ConfigNode.ParseVector3(node.GetValue("localTranslationEnd"));
+                }
+                else
+                {
+                    vectorStart = ConfigNode.ParseVector3(node.GetValue("localTranslationStart"));
+                    vectorEnd = ConfigNode.ParseVector3(node.GetValue("localTranslationEnd"));
+                }
                 mode = Mode.Translation;
             }
             else if (node.HasValue("controlledTransform") && node.HasValue("localScaleStart") && node.HasValue("localScaleEnd"))
             {
                 controlledTransform = thisProp.FindModelTransform(node.GetValue("controlledTransform").Trim());
                 initialScale = controlledTransform.localScale;
-                vectorStart = ConfigNode.ParseVector3(node.GetValue("localScaleStart"));
-                vectorEnd = ConfigNode.ParseVector3(node.GetValue("localScaleEnd"));
+                if (reverse)
+                {
+                    vectorEnd = ConfigNode.ParseVector3(node.GetValue("localScaleStart"));
+                    vectorStart = ConfigNode.ParseVector3(node.GetValue("localScaleEnd"));
+                }
+                else
+                {
+                    vectorStart = ConfigNode.ParseVector3(node.GetValue("localScaleStart"));
+                    vectorEnd = ConfigNode.ParseVector3(node.GetValue("localScaleEnd"));
+                }
                 mode = Mode.Scale;
             }
             else if (node.HasValue("controlledTransform") && node.HasValue("textureLayers") && node.HasValue("textureShiftStart") && node.HasValue("textureShiftEnd"))
             {
-                affectedMaterial = thisProp.FindModelTransform(node.GetValue("controlledTransform").Trim()).renderer.material;
-                textureLayer = node.GetValue("textureLayers");
-                textureShiftStart = ConfigNode.ParseVector2(node.GetValue("textureShiftStart"));
-                textureShiftEnd = ConfigNode.ParseVector2(node.GetValue("textureShiftEnd"));
+                affectedMaterial = thisProp.FindModelTransform(node.GetValue("controlledTransform").Trim()).GetComponent<Renderer>().material;
+                var textureLayers = node.GetValue("textureLayers").Split(',');
+                for (int i = 0; i < textureLayers.Length; ++i)
+                {
+                    textureLayer.Add(textureLayers[i].Trim());
+                }
+
+                if (reverse)
+                {
+                    textureShiftEnd = ConfigNode.ParseVector2(node.GetValue("textureShiftStart"));
+                    textureShiftStart = ConfigNode.ParseVector2(node.GetValue("textureShiftEnd"));
+                }
+                else
+                {
+                    textureShiftStart = ConfigNode.ParseVector2(node.GetValue("textureShiftStart"));
+                    textureShiftEnd = ConfigNode.ParseVector2(node.GetValue("textureShiftEnd"));
+                }
                 mode = Mode.TextureShift;
             }
             else if (node.HasValue("controlledTransform") && node.HasValue("textureLayers") && node.HasValue("textureScaleStart") && node.HasValue("textureScaleEnd"))
             {
-                affectedMaterial = thisProp.FindModelTransform(node.GetValue("controlledTransform").Trim()).renderer.material;
-                textureLayer = node.GetValue("textureLayers");
-                textureScaleStart = ConfigNode.ParseVector2(node.GetValue("textureScaleStart"));
-                textureScaleEnd = ConfigNode.ParseVector2(node.GetValue("textureScaleEnd"));
+                affectedMaterial = thisProp.FindModelTransform(node.GetValue("controlledTransform").Trim()).GetComponent<Renderer>().material;
+                var textureLayers = node.GetValue("textureLayers").Split(',');
+                for (int i = 0; i < textureLayers.Length; ++i)
+                {
+                    textureLayer.Add(textureLayers[i].Trim());
+                }
+
+                if (reverse)
+                {
+                    textureScaleEnd = ConfigNode.ParseVector2(node.GetValue("textureScaleStart"));
+                    textureScaleStart = ConfigNode.ParseVector2(node.GetValue("textureScaleEnd"));
+                }
+                else
+                {
+                    textureScaleStart = ConfigNode.ParseVector2(node.GetValue("textureScaleStart"));
+                    textureScaleEnd = ConfigNode.ParseVector2(node.GetValue("textureScaleEnd"));
+                }
                 mode = Mode.TextureScale;
             }
             else
@@ -483,6 +579,19 @@ namespace JSI
             }
         }
 
+        // Some things need to be explicitly destroyed due to Unity quirks.
+        internal void TearDown()
+        {
+            if (affectedMaterial != null)
+            {
+                UnityEngine.Object.Destroy(affectedMaterial);
+                affectedMaterial = null;
+            }
+            textureLayer = null;
+            controlledTransform = null;
+            part = null;
+        }
+
         private void TurnOn(double universalTime)
         {
             if (!currentState)
@@ -490,7 +599,7 @@ namespace JSI
                 switch (mode)
                 {
                     case Mode.Color:
-                        colorShiftRenderer.material.SetColor(colorName, (reverse ? passiveColor : activeColor));
+                        affectedMaterial.SetColor(colorName, activeColor);
                         break;
                     case Mode.Animation:
                         onAnim[animationName].normalizedTime = reverse ? 0f : 1f;
@@ -503,24 +612,24 @@ namespace JSI
                         }
                         break;
                     case Mode.Rotation:
-                        controlledTransform.localRotation = initialRotation * (reverse ? rotationEnd : rotationStart);
+                        controlledTransform.localRotation = initialRotation * (longPath ? Quaternion.Euler(vectorStart) : rotationStart);
                         break;
                     case Mode.Translation:
-                        controlledTransform.localPosition = initialPosition + (reverse ? vectorEnd : vectorStart);
+                        controlledTransform.localPosition = initialPosition + vectorStart;
                         break;
                     case Mode.Scale:
-                        controlledTransform.localScale = initialScale + (reverse ? vectorEnd : vectorStart);
+                        controlledTransform.localScale = initialScale + vectorStart;
                         break;
                     case Mode.TextureShift:
-                        foreach (string token in textureLayer.Split(','))
+                        for (int i = 0; i < textureLayer.Count; ++i)
                         {
-                            affectedMaterial.SetTextureOffset(token.Trim(), reverse ? textureShiftEnd : textureShiftStart);
+                            affectedMaterial.SetTextureOffset(textureLayer[i], textureShiftStart);
                         }
                         break;
                     case Mode.TextureScale:
-                        foreach (string token in textureLayer.Split(','))
+                        for (int i = 0; i < textureLayer.Count; ++i)
                         {
-                            affectedMaterial.SetTextureScale(token.Trim(), reverse ? textureScaleEnd : textureScaleStart);
+                            affectedMaterial.SetTextureScale(textureLayer[i], textureScaleStart);
                         }
                         break;
                 }
@@ -551,7 +660,7 @@ namespace JSI
                 switch (mode)
                 {
                     case Mode.Color:
-                        colorShiftRenderer.material.SetColor(colorName, (reverse ? activeColor : passiveColor));
+                        affectedMaterial.SetColor(colorName, passiveColor);
                         break;
                     case Mode.Animation:
                         onAnim[animationName].normalizedTime = reverse ? 1f : 0f;
@@ -572,24 +681,24 @@ namespace JSI
                         }
                         break;
                     case Mode.Rotation:
-                        controlledTransform.localRotation = initialRotation * (reverse ? rotationStart : rotationEnd);
+                        controlledTransform.localRotation = initialRotation * (longPath ? Quaternion.Euler(vectorEnd) : rotationEnd);
                         break;
                     case Mode.Translation:
-                        controlledTransform.localPosition = initialPosition + (reverse ? vectorStart : vectorEnd);
+                        controlledTransform.localPosition = initialPosition + vectorEnd;
                         break;
                     case Mode.Scale:
-                        controlledTransform.localScale = initialScale + (reverse ? vectorStart : vectorEnd);
+                        controlledTransform.localScale = initialScale + vectorEnd;
                         break;
                     case Mode.TextureShift:
-                        foreach (string token in textureLayer.Split(','))
+                        for (int i = 0; i < textureLayer.Count; ++i)
                         {
-                            affectedMaterial.SetTextureOffset(token.Trim(), reverse ? textureShiftStart : textureShiftEnd);
+                            affectedMaterial.SetTextureOffset(textureLayer[i], textureShiftEnd);
                         }
                         break;
                     case Mode.TextureScale:
-                        foreach (string token in textureLayer.Split(','))
+                        for (int i = 0; i < textureLayer.Count; ++i)
                         {
-                            affectedMaterial.SetTextureScale(token.Trim(), reverse ? textureScaleStart : textureScaleEnd);
+                            affectedMaterial.SetTextureScale(textureLayer[i], textureScaleEnd);
                         }
                         break;
                 }
@@ -598,13 +707,9 @@ namespace JSI
             lastStateChange = universalTime;
         }
 
-        public void Update(RPMVesselComputer comp, double universalTime)
+        public void Update(double universalTime)
         {
-            float scaledValue;
-            if (!variable.InverseLerp(comp, out scaledValue))
-            {
-                return;
-            }
+            float scaledValue = variable.InverseLerp();
 
             float delta = Mathf.Abs(scaledValue - lastScaledValue);
             if (delta < float.Epsilon)
@@ -641,8 +746,16 @@ namespace JSI
             {
                 float maxDelta = (float)(universalTime - lastAnimUpdate) * maxRateChange;
 
-                if (Mathf.Abs(lastScaledValue - scaledValue) > maxDelta)
+                float difference = Mathf.Abs(lastScaledValue - scaledValue);
+                if (difference > maxDelta)
                 {
+                    bool wrapAround = usesModulo && (difference > 0.5f);
+                    if (wrapAround)
+                    {
+                        maxDelta = Mathf.Min(maxDelta, 1.0f - difference);
+                        maxDelta = -maxDelta;
+                    }
+
                     if (scaledValue < lastScaledValue)
                     {
                         scaledValue = lastScaledValue - maxDelta;
@@ -650,6 +763,18 @@ namespace JSI
                     else
                     {
                         scaledValue = lastScaledValue + maxDelta;
+                    }
+
+                    if(wrapAround)
+                    {
+                        if(scaledValue < 0.0f)
+                        {
+                            scaledValue += 1.0f;
+                        }
+                        else if(scaledValue > 1.0f)
+                        {
+                            scaledValue -= 1.0f;
+                        }
                     }
                 }
             }
@@ -708,31 +833,31 @@ namespace JSI
                 switch (mode)
                 {
                     case Mode.Rotation:
-                        Quaternion newRotation = longPath ? Quaternion.Euler(Vector3.Lerp(reverse ? vectorEnd : vectorStart, reverse ? vectorStart : vectorEnd, scaledValue)) :
-                                                 Quaternion.Slerp(reverse ? rotationEnd : rotationStart, reverse ? rotationStart : rotationEnd, scaledValue);
+                        Quaternion newRotation = longPath ? Quaternion.Euler(Vector3.Lerp(vectorStart, vectorEnd, scaledValue)) :
+                                                 Quaternion.Slerp(rotationStart, rotationEnd, scaledValue);
                         controlledTransform.localRotation = initialRotation * newRotation;
                         break;
                     case Mode.Translation:
-                        controlledTransform.localPosition = initialPosition + Vector3.Lerp(reverse ? vectorEnd : vectorStart, reverse ? vectorStart : vectorEnd, scaledValue);
+                        controlledTransform.localPosition = initialPosition + Vector3.Lerp(vectorStart, vectorEnd, scaledValue);
                         break;
                     case Mode.Scale:
-                        controlledTransform.localScale = initialScale + Vector3.Lerp(reverse ? vectorEnd : vectorStart, reverse ? vectorStart : vectorEnd, scaledValue);
+                        controlledTransform.localScale = initialScale + Vector3.Lerp(vectorStart, vectorEnd, scaledValue);
                         break;
                     case Mode.Color:
-                        colorShiftRenderer.material.SetColor(colorName, Color.Lerp(reverse ? activeColor : passiveColor, reverse ? passiveColor : activeColor, scaledValue));
+                        affectedMaterial.SetColor(colorName, Color.Lerp(passiveColor, activeColor, scaledValue));
                         break;
                     case Mode.TextureShift:
-                        foreach (string token in textureLayer.Split(','))
+                        for (int i = 0; i < textureLayer.Count; ++i)
                         {
-                            affectedMaterial.SetTextureOffset(token.Trim(),
-                                Vector2.Lerp(reverse ? textureShiftEnd : textureShiftStart, reverse ? textureShiftStart : textureShiftEnd, scaledValue));
+                            affectedMaterial.SetTextureOffset(textureLayer[i],
+                                Vector2.Lerp(textureShiftStart, textureShiftEnd, scaledValue));
                         }
                         break;
                     case Mode.TextureScale:
-                        foreach (string token in textureLayer.Split(','))
+                        for (int i = 0; i < textureLayer.Count; ++i)
                         {
-                            affectedMaterial.SetTextureScale(token.Trim(),
-                                Vector2.Lerp(reverse ? textureScaleEnd : textureScaleStart, reverse ? textureScaleStart : textureScaleEnd, scaledValue));
+                            affectedMaterial.SetTextureScale(textureLayer[i],
+                                Vector2.Lerp(textureScaleStart, textureScaleEnd, scaledValue));
                         }
                         break;
                     case Mode.LoopingAnimation:
@@ -751,6 +876,14 @@ namespace JSI
             if (audioOutput != null && alarmActive)
             {
                 audioOutput.audio.volume = 0;
+            }
+        }
+
+        public void UnmuteSoundWhileInIVA()
+        {
+            if (audioOutput != null && alarmActive)
+            {
+                audioOutput.audio.volume = alarmSoundVolume * GameSettings.SHIP_VOLUME;
             }
         }
 

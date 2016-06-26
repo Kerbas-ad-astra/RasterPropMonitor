@@ -1,5 +1,26 @@
+/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
 using UnityEngine;
 using System;
+using KSP.UI.Screens.Flight;
 
 namespace JSI
 {
@@ -127,7 +148,7 @@ namespace JSI
 
             float overlayDepth = navBall.transform.position.z - navballRadius - 0.1f;
 
-            Shader displayShader = JUtil.LoadInternalShader("RPM-DisplayShader");
+            Shader displayShader = JUtil.LoadInternalShader("RPM/DisplayShader");
 
             if (!string.IsNullOrEmpty(staticOverlay))
             {
@@ -137,7 +158,7 @@ namespace JSI
                 overlay = JUtil.CreateSimplePlane("RPMPFDOverlay" + internalProp.propID, cameraSpan, drawingLayer);
                 overlay.layer = drawingLayer;
                 overlay.transform.position = new Vector3(0, 0, overlayDepth);
-                overlay.renderer.material = overlayMaterial;
+                overlay.GetComponent<Renderer>().material = overlayMaterial;
                 overlay.transform.parent = cameraBody.transform;
             }
 
@@ -152,8 +173,9 @@ namespace JSI
                 heading = JUtil.CreateSimplePlane("RPMPFDHeading" + internalProp.propID, new Vector2(headingBarPosition.z * pixelSize, headingBarPosition.w * pixelSize), new Rect(0.0f, 0.0f, 1.0f, 1.0f), drawingLayer);
                 heading.transform.position = new Vector3(hbXPos * pixelSize, hbYPos * pixelSize, headingAboveOverlay ? (overlayDepth - 0.1f) : (overlayDepth + 0.1f));
                 heading.transform.parent = cameraBody.transform;
-                heading.renderer.material = headingMaterial;
-                heading.renderer.material.SetTextureScale("_MainTex", new Vector2(headingSpan, 1f));
+                Renderer hdgMatl = null;
+                heading.GetComponentCached<Renderer>(ref hdgMatl).material = headingMaterial;
+                hdgMatl.material.SetTextureScale("_MainTex", new Vector2(headingSpan, 1f));
             }
 
             Texture2D gizmoTexture = JUtil.GetGizmoTexture();
@@ -202,17 +224,19 @@ namespace JSI
             RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
             if (heading != null)
             {
-                heading.renderer.material.SetTextureOffset("_MainTex",
+                heading.GetComponent<Renderer>().material.SetTextureOffset("_MainTex",
                     new Vector2(JUtil.DualLerp(0f, 1f, 0f, 360f, comp.RotationVesselSurface.eulerAngles.y) - headingSpan / 2f, 0));
             }
 
             Quaternion gymbal = stockNavBall.attitudeGymbal;
 
-            if (FlightUIController.speedDisplayMode == FlightUIController.SpeedDisplayModes.Orbit)
+            if (FlightGlobals.speedDisplayMode == FlightGlobals.SpeedDisplayModes.Orbit)
             {
                 Vector3 velocityVesselOrbitUnit = comp.Prograde;
                 Vector3 radialPlus = comp.RadialOut;
                 Vector3 normalPlus = comp.NormalPlus;
+                // stockNavBall.relativeGymbal * (stockNavBall.progradeVector.localRotation * stockNavBall.progradeVector.right == gymbal * velocityVesselOrbitUnit
+                // But...  Same is true for stockNavBall.normalVector and stockNavBall.radialOutVector
 
                 MoveMarker(markerPrograde, velocityVesselOrbitUnit, gymbal);
                 MoveMarker(markerRetrograde, -velocityVesselOrbitUnit, gymbal);
@@ -225,13 +249,13 @@ namespace JSI
 
                 JUtil.ShowHide(true, markerNormal, markerNormalMinus, markerRadial, markerRadialMinus);
             }
-            else if (FlightUIController.speedDisplayMode == FlightUIController.SpeedDisplayModes.Surface)
+            else if (FlightGlobals.speedDisplayMode == FlightGlobals.SpeedDisplayModes.Surface)
             {
                 Vector3 velocityVesselSurfaceUnit = vessel.srf_velocity.normalized;
                 MoveMarker(markerPrograde, velocityVesselSurfaceUnit, gymbal);
                 MoveMarker(markerRetrograde, -velocityVesselSurfaceUnit, gymbal);
             }
-            else // FlightUIController.speedDisplayMode == FlightUIController.SpeedDisplayModes.Target
+            else // FlightGlobals.speedDisplayMode == FlightGlobals.SpeedDisplayModes.Target
             {
                 Vector3 targetDirection = FlightGlobals.ship_tgtVelocity.normalized;
 
@@ -247,25 +271,37 @@ namespace JSI
                 JUtil.ShowHide(true, markerManeuver, markerManeuverMinus);
             }
 
+            /*
             if (FinePrint.WaypointManager.navIsActive() == true)
             {
                 // MOARdV: Code for the waypoint marker based on https://github.com/Ninenium/NavHud/blob/master/Source/WaypointMarker.cs
-                GameObject navWaypointIndicator = GameObject.Find("NavBall").transform.FindChild("vectorsPivot").FindChild("NavWaypoint").gameObject;
-                Material material = navWaypointIndicator.renderer.sharedMaterial;
-                markerNavWaypoint.renderer.material.mainTexture = material.mainTexture;
-                markerNavWaypoint.renderer.material.mainTextureScale = Vector2.one;
-                markerNavWaypoint.renderer.material.mainTextureOffset = Vector2.zero;
-                if (string.IsNullOrEmpty(waypointColor))
+                // However, in 1.1.2 (maybe earlier), the NavBall gameobject doesn't have children.
+                // And in 1.1.3, FinePrint.WaypointManager .navIsActive and .navWaypoint no longer exist...
+                try
                 {
-                    markerNavWaypoint.renderer.material.SetVector("_Color", material.GetVector("_Color"));
-                }
-                
-                Vector3d waypointPosition = vessel.mainBody.GetWorldSurfacePosition(FinePrint.WaypointManager.navWaypoint.latitude, FinePrint.WaypointManager.navWaypoint.longitude, FinePrint.WaypointManager.navWaypoint.altitude);
-                Vector3 waypointDirection = (waypointPosition - vessel.CoM).normalized;
-                MoveMarker(markerNavWaypoint, waypointDirection, gymbal);
-                JUtil.ShowHide(true, markerNavWaypoint);
-            }
+                    GameObject navWaypointIndicator = GameObject.Find("NavBall").transform.FindChild("vectorsPivot").FindChild("NavWaypoint").gameObject;
+                    Renderer markerRenderer = null;
+                    markerNavWaypoint.GetComponentCached<Renderer>(ref markerRenderer);
+                    Material material = navWaypointIndicator.GetComponent<Renderer>().sharedMaterial;
+                    markerRenderer.material.mainTexture = material.mainTexture;
+                    markerRenderer.material.mainTextureScale = Vector2.one;
+                    markerRenderer.material.mainTextureOffset = Vector2.zero;
+                    if (string.IsNullOrEmpty(waypointColor))
+                    {
+                        markerRenderer.material.SetVector("_Color", material.GetVector("_Color"));
+                    }
 
+                    Vector3d waypointPosition = vessel.mainBody.GetWorldSurfacePosition(FinePrint.WaypointManager.navWaypoint.latitude, FinePrint.WaypointManager.navWaypoint.longitude, FinePrint.WaypointManager.navWaypoint.altitude);
+                    Vector3 waypointDirection = (waypointPosition - vessel.CoM).normalized;
+                    MoveMarker(markerNavWaypoint, waypointDirection, gymbal);
+                    JUtil.ShowHide(true, markerNavWaypoint);
+                }
+                catch
+                {
+                    // if something's borked, let's just silently do nothing
+                }
+            }
+            */
             ITargetable target = FlightGlobals.fetch.VesselTarget;
             if (target != null)
             {
@@ -309,14 +345,19 @@ namespace JSI
         {
             if (buttonID == speedModeButton)
             {
-                FlightUIController.fetch.cycleSpdModes();
+                FlightGlobals.CycleSpeedModes();
             }
         }
 
+        private readonly int opacityIndex = Shader.PropertyToID("_Opacity");
+        private DefaultableDictionary<GameObject, Renderer> markerRenderer = new DefaultableDictionary<GameObject, Renderer>(null);
         private void MoveMarker(GameObject marker, Vector3 position, Quaternion voodooGymbal)
         {
             Vector3 newPosition = ((voodooGymbal * position) * navballRadius) + navBallOrigin;
-            marker.renderer.material.SetFloat("_Opacity", Mathf.Clamp01(newPosition.z + 0.5f));
+            Renderer r = markerRenderer[marker];
+            marker.GetComponentCached<Renderer>(ref r);
+            markerRenderer[marker] = r;
+            r.material.SetFloat(opacityIndex, Mathf.Clamp01(newPosition.z + 0.5f));
             marker.transform.position = new Vector3(newPosition.x, newPosition.y, markerDepth);
         }
 
@@ -337,7 +378,7 @@ namespace JSI
             material.mainTextureOffset = new Vector2(iconX * (1f / 3f), iconY * (1f / 3f));
             material.color = Color.white;
             material.SetVector("_Color", nativeColor);
-            marker.renderer.material = material;
+            marker.GetComponent<Renderer>().material = material;
 
             marker.transform.position = Vector3.zero;
 
@@ -389,9 +430,18 @@ namespace JSI
                     waypointColorValue = ConfigNode.ParseColor32(waypointColor);
                 }
 
-                Shader displayShader = JUtil.LoadInternalShader("RPM-DisplayShader");
+                Shader displayShader = JUtil.LoadInternalShader("RPM/DisplayShader");
 
-                stockNavBall = FlightUIController.fetch.GetComponentInChildren<NavBall>();
+                try
+                {
+                    stockNavBall = UnityEngine.Object.FindObjectOfType<KSP.UI.Screens.Flight.NavBall>();
+                }
+                catch (Exception e)
+                {
+                    JUtil.LogErrorMessage(this, "Unable to fetch the NavBall object: {0}", e);
+                    // Set up a bogus one so there's no null derefs.
+                    stockNavBall = new NavBall();
+                }
 
                 // Non-moving parts...
                 cameraBody = new GameObject();
@@ -413,30 +463,30 @@ namespace JSI
                 ballCamera.transform.LookAt(navBallPosition, Vector3.up);
 
                 navBall = GameDatabase.Instance.GetModel(navBallModel.EnforceSlashes());
-                if(navBall == null)
+                if (navBall == null)
                 {
                     JUtil.LogErrorMessage(this, "Failed to load navball model {0}", navBallModel);
                     // Early return here - if we don't even have a navball, this module is pointless.
                     return;
                 }
 
-                Destroy(navBall.collider);
+                Destroy(navBall.GetComponent<Collider>());
                 navBall.name = "RPMNB" + navBall.GetInstanceID();
                 navBall.layer = drawingLayer;
                 navBall.transform.parent = cameraBody.transform;
                 navBall.transform.position = navBallPosition;
-                navBall.renderer.material.shader = displayShader;
+                navBall.GetComponent<Renderer>().material.shader = displayShader;
                 Texture2D horizonTex = GameDatabase.Instance.GetTexture(horizonTexture.EnforceSlashes(), false);
                 if (horizonTex != null)
                 {
-                    navBall.renderer.material.mainTexture = horizonTex;
+                    navBall.GetComponent<Renderer>().material.mainTexture = horizonTex;
                 }
                 else
                 {
                     JUtil.LogErrorMessage(this, "Failed to load horizon texture {0}", horizonTexture);
                 }
 
-                navBall.renderer.material.SetFloat("_Opacity", ballOpacity);
+                navBall.GetComponent<Renderer>().material.SetFloat("_Opacity", ballOpacity);
 
                 startupComplete = true;
             }

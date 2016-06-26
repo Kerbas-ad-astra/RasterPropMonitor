@@ -1,6 +1,26 @@
-﻿using UnityEngine;
+﻿/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
 using System;
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace JSI
 {
@@ -22,6 +42,7 @@ namespace JSI
         public string coloredObject = string.Empty;
         [KSPField]
         public string colorName = "_EmissiveColor";
+        private int colorNameId = -1;
         private readonly List<VariableLabelSet> labelsEx = new List<VariableLabelSet>();
         private int activeLabel;
         private const string fontName = "Arial";
@@ -30,6 +51,7 @@ namespace JSI
         private int updateCountdown;
         private Renderer colorShiftRenderer;
         private FXGroup audioOutput;
+        private RasterPropMonitorComputer rpmComp;
 
         public void Start()
         {
@@ -40,6 +62,8 @@ namespace JSI
 
             try
             {
+                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
+
                 textObjTransform = internalProp.FindModelTransform(labelTransform);
                 textObj = InternalComponents.Instance.CreateText(fontName, fontSize, textObjTransform, string.Empty);
                 activeLabel = 0;
@@ -59,11 +83,11 @@ namespace JSI
                         {
                             try
                             {
-                                labelsEx.Add(new VariableLabelSet(variableNodes[i]));
+                                labelsEx.Add(new VariableLabelSet(variableNodes[i], part));
                             }
                             catch (ArgumentException e)
                             {
-                                JUtil.LogMessage(this, "Error in building prop number {1} - {0}", e.Message, internalProp.propID);
+                                JUtil.LogErrorMessage(this, "Error in building prop number {1} - {0}", e.Message, internalProp.propID);
                             }
                         }
                         break;
@@ -75,30 +99,35 @@ namespace JSI
                 {
                     try
                     {
-                        labelsEx.Add(new VariableLabelSet(moduleConfig));
+                        labelsEx.Add(new VariableLabelSet(moduleConfig, part));
                     }
                     catch (ArgumentException e)
                     {
-                        JUtil.LogMessage(this, "Error in building prop number {1} - {0}", e.Message, internalProp.propID);
+                        JUtil.LogErrorMessage(this, "Error in building prop number {1} - {0}", e.Message, internalProp.propID);
                     }
                 }
 
                 if (labelsEx.Count == 0)
                 {
-                    JUtil.LogMessage(this, "No labels defined.");
+                    JUtil.LogErrorMessage(this, "No labels defined.");
                     throw new ArgumentException("No labels defined");
                 }
 
                 colorShiftRenderer = internalProp.FindModelComponent<Renderer>(coloredObject);
                 if (labelsEx[activeLabel].hasColor)
                 {
-                    colorShiftRenderer.material.SetColor(colorName, labelsEx[activeLabel].color);
+                    colorNameId = Shader.PropertyToID(colorName);
+                    colorShiftRenderer.material.SetColor(colorNameId, labelsEx[activeLabel].color);
                 }
                 if (labelsEx[activeLabel].hasText)
                 {
                     if (labelsEx[activeLabel].oneShot)
                     {
-                        textObj.text.Text = labelsEx[activeLabel].labelText;
+                        // Fetching formatString directly is notionally bad
+                        // because there may be formatting stuff, but if
+                        // oneShot is true, we already know that this is a
+                        // constant string with no formatting.
+                        textObj.text.Text = labelsEx[activeLabel].label.formatString;
                     }
                     else
                     {
@@ -124,6 +153,18 @@ namespace JSI
 
         private bool UpdateCheck()
         {
+            // Saw an out-of-range exception in the next if clause once as a
+            // side effect of docking.  Not sure if OnUpdate was called after
+            // onDestroy, or before Start.
+            if (activeLabel > labelsEx.Count)
+            {
+                activeLabel = labelsEx.Count - 1;
+                if(activeLabel < 0)
+                {
+                    return false;
+                }
+            }
+
             if (labelsEx[activeLabel].oneShot)
             {
                 return false;
@@ -140,13 +181,10 @@ namespace JSI
 
         public override void OnUpdate()
         {
-            if (!JUtil.VesselIsInIVA(vessel) || !UpdateCheck())
+            if (JUtil.RasterPropMonitorShouldUpdate(vessel) && UpdateCheck())
             {
-                return;
+                textObj.text.Text = StringProcessor.ProcessString(labelsEx[activeLabel].label, rpmComp);
             }
-
-            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-            textObj.text.Text = StringProcessor.ProcessString(labelsEx[activeLabel].labelText, comp, internalProp.propID);
         }
 
         public void Click()
@@ -160,13 +198,12 @@ namespace JSI
 
             if (labelsEx[activeLabel].hasColor)
             {
-                colorShiftRenderer.material.SetColor(colorName, labelsEx[activeLabel].color);
+                colorShiftRenderer.material.SetColor(colorNameId, labelsEx[activeLabel].color);
             }
 
-            if (labelsEx[activeLabel].hasText && labelsEx[activeLabel].oneShot)
+            if (labelsEx[activeLabel].hasText)
             {
-                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                textObj.text.Text = StringProcessor.ProcessString(labelsEx[activeLabel].labelText, comp, internalProp.propID);
+                textObj.text.Text = StringProcessor.ProcessString(labelsEx[activeLabel].label, rpmComp);
             }
 
             // Force an update.
@@ -182,19 +219,22 @@ namespace JSI
 
     public class VariableLabelSet
     {
-        public readonly string labelText;
+        public readonly StringProcessorFormatter label;
         public readonly bool hasText;
         public readonly bool oneShot;
         public readonly Color color;
         public readonly bool hasColor;
 
-        public VariableLabelSet(ConfigNode node)
+        public VariableLabelSet(ConfigNode node, Part part)
         {
+            RasterPropMonitorComputer rpmComp = null;
             if (node.HasValue("labelText"))
             {
-                labelText = node.GetValue("labelText").Trim().UnMangleConfigText();
+                string labelText = node.GetValue("labelText").Trim().UnMangleConfigText();
                 hasText = true;
                 oneShot = !labelText.Contains("$&$");
+                rpmComp = RasterPropMonitorComputer.Instantiate(part, true);
+                label = new StringProcessorFormatter(labelText, rpmComp);
             }
             else
             {
@@ -204,14 +244,13 @@ namespace JSI
 
             if (node.HasValue("color"))
             {
-                color = ConfigNode.ParseColor32(node.GetValue("color").Trim());
+                color = JUtil.ParseColor32(node.GetValue("color").Trim(), part, ref rpmComp);
                 hasColor = true;
             }
             else
             {
                 hasColor = false;
             }
-
         }
     }
 }

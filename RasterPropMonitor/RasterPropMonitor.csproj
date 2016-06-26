@@ -9,7 +9,7 @@
     <OutputType>Library</OutputType>
     <RootNamespace>JSI</RootNamespace>
     <AssemblyName>RasterPropMonitor</AssemblyName>
-    <ReleaseVersion>0.23.2</ReleaseVersion>
+    <ReleaseVersion>0.27.0</ReleaseVersion>
     <TargetFrameworkVersion>v3.5</TargetFrameworkVersion>
     <CodePage>65001</CodePage>
   </PropertyGroup>
@@ -36,8 +36,16 @@
         <Command type="BeforeBuild" command="..\bin\Release\BumpBuildNumber.exe" workingdir="${SolutionDir}" />
       </CustomCommands>
     </CustomCommands>
+    <DefineConstants>
+    </DefineConstants>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="KSPAssets">
+      <HintPath>..\..\..\..\..\Games\Steam\steamapps\common\Kerbal Space Program\KSP_Data\Managed\KSPAssets.dll</HintPath>
+    </Reference>
+    <Reference Include="KSPUtil">
+      <HintPath>..\..\..\..\..\Games\Steam\steamapps\common\Kerbal Space Program\KSP_Data\Managed\KSPUtil.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="Assembly-CSharp">
       <HintPath>..\..\..\..\..\Games\Steam\steamapps\common\Kerbal Space Program\KSP_Data\Managed\Assembly-CSharp.dll</HintPath>
@@ -52,26 +60,43 @@
       <HintPath>..\..\..\..\..\Games\Steam\steamapps\common\Kerbal Space Program\KSP_Data\Managed\Assembly-CSharp-firstpass.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>..\..\..\..\..\Games\Steam\steamapps\common\Kerbal Space Program\KSP_Data\Managed\UnityEngine.UI.dll</HintPath>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Auxiliary modules\JSICallbackAnimator.cs" />
+    <Compile Include="Auxiliary modules\JSIEngineMonitor.cs" />
+    <Compile Include="Auxiliary modules\JSIFlashModule.cs" />
+    <Compile Include="Auxiliary modules\JSILabel.cs" />
+    <Compile Include="Auxiliary modules\JSINavBall.cs" />
     <Compile Include="Auxiliary modules\JSINumericInput.cs" />
     <Compile Include="Auxiliary modules\JSIRadar.cs" />
+    <Compile Include="Auxiliary modules\JSIThrustReverser.cs" />
+    <Compile Include="Core\AeroExtensions.cs" />
     <Compile Include="Core\CustomVariable.cs" />
+    <Compile Include="Core\JSITextMesh.cs" />
     <Compile Include="Core\MathVariable.cs" />
+    <Compile Include="Core\RPMCEvaluators.cs" />
+    <Compile Include="Core\RPMCPersistence.cs" />
+    <Compile Include="Core\RPMGlobals.cs" />
     <Compile Include="Core\RPMVCEvaluators.cs" />
-    <Compile Include="Core\RPMVCTriggeredEvent.cs" />
-    <Compile Include="Core\RPMVCVariableToObject.cs" />
+    <Compile Include="Core\RPMCTriggeredEvent.cs" />
+    <Compile Include="Core\RPMVCPerModule.cs" />
     <Compile Include="Core\RPMVesselComputer.cs" />
     <Compile Include="Core\MappedVariable.cs" />
     <Compile Include="Core\Protractor.cs" />
     <Compile Include="Core\SelectVariable.cs" />
     <Compile Include="Core\TextRenderer.cs" />
     <Compile Include="Handlers\IJSIModule.cs" />
+    <Compile Include="Handlers\JSIChatterer.cs" />
+    <Compile Include="Handlers\JSIEngine.cs" />
     <Compile Include="Handlers\JSIFAR.cs" />
     <Compile Include="Handlers\JSIGraphingBackground.cs" />
     <Compile Include="Handlers\JSIKAC.cs" />
     <Compile Include="Handlers\JSIMechJeb.cs" />
     <Compile Include="Handlers\JSIParachute.cs" />
+    <Compile Include="Handlers\JSIPilotAssistant.cs" />
     <Compile Include="Handlers\JSISASMenu.cs" />
     <Compile Include="Handlers\KACWrapper.cs" />
     <Compile Include="Handlers\MechJebRPM.cs" />
@@ -86,7 +111,7 @@
     <Compile Include="Core\MonitorPage.cs" />
     <Compile Include="Core\SIFormatter.cs" />
     <Compile Include="Core\UtilityFunctions.cs" />
-    <Compile Include="Core\PropMonitorComputer.cs" />
+    <Compile Include="Core\RasterPropMonitorComputer.cs" />
     <Compile Include="Core\RasterPropMonitor.cs" />
     <Compile Include="Auxiliary modules\JSIInternalBackgroundNoise.cs" />
     <Compile Include="Auxiliary modules\JSIVariableLabel.cs" />
@@ -116,7 +141,6 @@
     <Compile Include="Core\VariableHandler.cs" />
     <Compile Include="Handlers\JSIInternalRPMButtons.cs" />
     <Compile Include="Handlers\JSIOdometer.cs" />
-    <Compile Include="Auxiliary modules\JSITransparentPod.cs" />
     <Compile Include="Auxiliary modules\JSISelectivelyVisibleProp.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.targets" />
@@ -183,11 +207,11 @@
   </ProjectExtensions>
   <ItemGroup />
   <ItemGroup>
-    <EmbeddedResource Include="Shaders\RPM-DisplayShader-compiled.shader" />
-    <EmbeddedResource Include="Shaders\RPM-CroppedDisplayShader-compiled.shader" />
+    <None Include="Shaders\RPM-DisplayShader-compiled.shader" />
+    <None Include="Shaders\RPM-CroppedDisplayShader-compiled.shader" />
     <None Include="Shaders\RPM-CroppedDisplayShader.shader" />
     <None Include="Shaders\RPM-DisplayShader.shader" />
-    <EmbeddedResource Include="Shaders\RPM-FontShader-compiled.shader" />
+    <None Include="Shaders\RPM-FontShader-compiled.shader" />
     <None Include="Shaders\RPM-FontShader.shader" />
   </ItemGroup>
   <PropertyGroup>

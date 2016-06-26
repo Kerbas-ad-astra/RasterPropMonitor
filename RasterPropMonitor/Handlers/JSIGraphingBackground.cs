@@ -35,8 +35,7 @@ namespace JSI
         private List<DataSet> dataSets = new List<DataSet>();
         private bool startupComplete = false;
         private Material lineMaterial = JUtil.DrawLineMaterial();
-        private Material graphMaterial;
-
+        private RasterPropMonitorComputer rpmComp;
 
         public bool RenderBackground(RenderTexture screen, float cameraAspect)
         {
@@ -53,7 +52,6 @@ namespace JSI
 
             try
             {
-                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
                 // Render background - eventually, squirrel this away onto a render tex
                 for (int i = 0; i < dataSets.Count; ++i)
                 {
@@ -63,7 +61,7 @@ namespace JSI
                 // Render data
                 for (int i = 0; i < dataSets.Count; ++i)
                 {
-                    dataSets[i].RenderData(screen, comp);
+                    dataSets[i].RenderData(screen);
                 }
             }
             catch
@@ -100,6 +98,8 @@ namespace JSI
             }
             try
             {
+                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
+
                 if (string.IsNullOrEmpty(layout))
                 {
                     throw new ArgumentNullException("layout");
@@ -126,7 +126,7 @@ namespace JSI
                         {
                             try
                             {
-                                dataSets.Add(new DataSet(dataNodes[i]));
+                                dataSets.Add(new DataSet(dataNodes[i], rpmComp));
                             }
                             catch (ArgumentException e)
                             {
@@ -138,7 +138,6 @@ namespace JSI
                     }
                 }
 
-                graphMaterial = new Material(Shader.Find("KSP/Alpha/Unlit Transparent"));
                 startupComplete = true;
             }
 
@@ -160,7 +159,7 @@ namespace JSI
         //--- Static data
         private readonly Vector2 position;
         private readonly Vector2 size;
-        private readonly Color32 color = new Color(0.0f, 0.0f, 0.0f, 0.0f);
+        private readonly Color color = new Color(0.0f, 0.0f, 0.0f, 0.0f);
         private readonly int lineWidth = 0;
 
         private readonly Vector2 fillTopLeftCorner;
@@ -168,10 +167,9 @@ namespace JSI
 
         //--- Graphing data
         private readonly GraphType graphType;
-        private readonly string variableName;
-        private readonly Color32 passiveColor = new Color(0.0f, 0.0f, 0.0f, 0.0f);
-        private readonly Color32 activeColor = new Color(0.0f, 0.0f, 0.0f, 0.0f);
-        private readonly VariableOrNumber[] scale = new VariableOrNumber[2];
+        private readonly VariableOrNumberRange variable;
+        private readonly Color passiveColor = new Color(0.0f, 0.0f, 0.0f, 0.0f);
+        private readonly Color activeColor = new Color(0.0f, 0.0f, 0.0f, 0.0f);
         private readonly Vector2 threshold;
         private double lastStateChange = 0.0;
         private float lastState = 0.0f;
@@ -190,7 +188,7 @@ namespace JSI
             Lamp,
         };
 
-        public DataSet(ConfigNode node)
+        public DataSet(ConfigNode node, RasterPropMonitorComputer rpmComp)
         {
             Vector4 packedPosition = ConfigNode.ParseVector4(node.GetValue("borderPosition"));
             position.x = packedPosition.x;
@@ -251,9 +249,12 @@ namespace JSI
                 activeColor = ConfigNode.ParseColor32(node.GetValue("activeColor"));
             }
             string[] token = node.GetValue("scale").Split(',');
-            scale[0] = VariableOrNumber.Instantiate(token[0]);
-            scale[1] = VariableOrNumber.Instantiate(token[1]);
-            variableName = node.GetValue("variableName").Trim();
+            if(token.Length != 2)
+            {
+                throw new ArgumentException("Background scale did not contain two values");
+            }
+
+            variable = new VariableOrNumberRange(rpmComp, node.GetValue("variableName").Trim(), token[0].Trim(), token[1].Trim());
 
             if (node.HasValue("reverse"))
             {
@@ -295,21 +296,9 @@ namespace JSI
             }
         }
 
-        public void RenderData(RenderTexture screen, RPMVesselComputer comp)
+        public void RenderData(RenderTexture screen)
         {
-            float leftVal, rightVal;
-            if (!scale[0].Get(out leftVal, comp) || !scale[1].Get(out rightVal, comp))
-            {
-                return; // bad values - can't render
-            }
-
-            float eval = comp.ProcessVariable(variableName).MassageToFloat();
-            if (float.IsInfinity(eval) || float.IsNaN(eval))
-            {
-                return; // bad value - can't render
-            }
-
-            float ratio = Mathf.InverseLerp(leftVal, rightVal, eval);
+            float ratio = variable.InverseLerp();
 
             if (thresholdMode)
             {
@@ -371,8 +360,8 @@ namespace JSI
 
         private void DrawBorder(RenderTexture screen)
         {
-            GL.Color(color);
             GL.Begin(GL.LINES);
+            GL.Color(color);
             for (int i = 0; i < lineWidth; ++i)
             {
                 float offset = (float)i;
@@ -397,8 +386,8 @@ namespace JSI
 
             Color fillColor = Color.Lerp(passiveColor, activeColor, fillRatio);
 
-            GL.Color(fillColor);
             GL.Begin(GL.QUADS);
+            GL.Color(fillColor);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillSize.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x * (1.0f - fillRatio), fillTopLeftCorner.y, 0.0f);
@@ -428,13 +417,12 @@ namespace JSI
         {
             Color fillColor = Color.Lerp(passiveColor, activeColor, fillRatio);
 
-            GL.Color(fillColor);
-
             if (fillRatio < 0.5f || fillRatio > 0.5f)
             {
                 // MOARdV: It doesn't look like back face culling is enabled,
                 // so I don't need to have separate cases for < 0.5 and > 0.5
                 GL.Begin(GL.QUADS);
+                GL.Color(fillColor);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x * fillRatio, fillTopLeftCorner.y, 0.0f);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x * fillRatio, fillTopLeftCorner.y + fillSize.y, 0.0f);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x * 0.5f, fillTopLeftCorner.y + fillSize.y, 0.0f);
@@ -444,6 +432,7 @@ namespace JSI
             else
             {
                 GL.Begin(GL.LINES);
+                GL.Color(fillColor);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x * 0.5f, fillTopLeftCorner.y, 0.0f);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x * 0.5f, fillTopLeftCorner.y + fillSize.y, 0.0f);
                 GL.End();
@@ -455,8 +444,8 @@ namespace JSI
         {
             Color fillColor = Color.Lerp(passiveColor, activeColor, fillRatio);
 
-            GL.Color(fillColor);
             GL.Begin(GL.QUADS);
+            GL.Color(fillColor);
             GL.Vertex3(fillTopLeftCorner.x, fillTopLeftCorner.y + fillSize.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillSize.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y, 0.0f);
@@ -473,8 +462,8 @@ namespace JSI
 
             Color fillColor = Color.Lerp(passiveColor, activeColor, fillRatio);
 
-            GL.Color(fillColor);
             GL.Begin(GL.QUADS);
+            GL.Color(fillColor);
             GL.Vertex3(fillTopLeftCorner.x, fillTopLeftCorner.y + fillRatio * fillSize.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillRatio * fillSize.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y, 0.0f);
@@ -486,13 +475,12 @@ namespace JSI
         {
             Color fillColor = Color.Lerp(passiveColor, activeColor, fillRatio);
 
-            GL.Color(fillColor);
-
             if (fillRatio < 0.5f || fillRatio > 0.5f)
             {
                 // MOARdV: It doesn't look like back face culling is enabled,
                 // so I don't need to have separate cases for < 0.5 and > 0.5
                 GL.Begin(GL.QUADS);
+                GL.Color(fillColor);
                 GL.Vertex3(fillTopLeftCorner.x, fillTopLeftCorner.y + fillSize.y * (1.0f - fillRatio), 0.0f);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillSize.y * (1.0f - fillRatio), 0.0f);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillSize.y * 0.5f, 0.0f);
@@ -502,6 +490,7 @@ namespace JSI
             else
             {
                 GL.Begin(GL.LINES);
+                GL.Color(fillColor);
                 GL.Vertex3(fillTopLeftCorner.x, fillTopLeftCorner.y + fillSize.y * 0.5f, 0.0f);
                 GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillSize.y * 0.5f, 0.0f);
                 GL.End();
@@ -518,8 +507,8 @@ namespace JSI
 
             Color fillColor = Color.Lerp(passiveColor, activeColor, fillRatio);
 
-            GL.Color(fillColor);
             GL.Begin(GL.QUADS);
+            GL.Color(fillColor);
             GL.Vertex3(fillTopLeftCorner.x, fillTopLeftCorner.y + fillSize.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillSize.y, 0.0f);
             GL.Vertex3(fillTopLeftCorner.x + fillSize.x, fillTopLeftCorner.y + fillSize.y * (1.0f - fillRatio), 0.0f);

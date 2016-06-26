@@ -58,6 +58,8 @@ namespace JSI
         private bool pageActiveState;
         private bool initialized = false;
         private int updateCountdown;
+        private RasterPropMonitorComputer rpmComp;
+
         // Analysis disable UnusedParameter
         public string ShowPage(int width, int height)
         {
@@ -67,6 +69,10 @@ namespace JSI
         public void PageActive(bool active, int pageNumber)
         {
             pageActiveState = active;
+            if (active)
+            {
+                updateCountdown = 0;
+            }
         }
         // Analysis restore UnusedParameter
         private bool UpdateCheck()
@@ -88,25 +94,18 @@ namespace JSI
                 return;
             }
 
-            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
             if (legacyRange != null)
             {
-                float scaledValue;
-                if (!legacyRange.InverseLerp(comp, out scaledValue))
-                {
-                    activePage = 1;
-                    return;
-                }
+                float scaledValue = legacyRange.InverseLerp();
 
                 activePage = (scaledValue >= threshold.x && scaledValue <= threshold.y) ? 0 : 1;
             }
             else
             {
-
                 activePage = 0;
                 for (activePage = 0; activePage < range.Count; ++activePage)
                 {
-                    if (range[activePage].IsInRange(comp))
+                    if (range[activePage].IsInRange())
                     {
                         break;
                     }
@@ -145,12 +144,19 @@ namespace JSI
 
         public void Start()
         {
+            if (HighLogic.LoadedSceneIsEditor)
+            {
+                return;
+            }
+
+            rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
+
             if (string.IsNullOrEmpty(definitionIn) && definitions != null)
             {
                 for (int i = 0; i < definitions.Length; ++i)
                 {
                     string[] varrange = definitions[i].range.Split(',');
-                    range.Add(new VariableOrNumberRange(definitions[i].variableName, varrange[0], varrange[1]));
+                    range.Add(new VariableOrNumberRange(rpmComp, definitions[i].variableName, varrange[0], varrange[1]));
                     text.Add(JUtil.LoadPageDefinition(definitions[i].page));
                 }
                 definitions = null;
@@ -162,7 +168,7 @@ namespace JSI
 
                 if (tokens.Length == 2)
                 {
-                    legacyRange = new VariableOrNumberRange(variableName, tokens[0], tokens[1]);
+                    legacyRange = new VariableOrNumberRange(rpmComp, variableName, tokens[0], tokens[1]);
 
                     float min = Mathf.Min(threshold.x, threshold.y);
                     float max = Mathf.Max(threshold.x, threshold.y);

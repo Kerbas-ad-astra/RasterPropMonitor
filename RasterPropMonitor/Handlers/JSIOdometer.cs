@@ -56,12 +56,12 @@ namespace JSI
         private Texture digitTex;
         private Texture characterTex;
         private Texture overlayTex;
-        private RasterPropMonitorComputer rpmComp;
         private double lastUpdate;
         private RenderTexture screenTexture;
         private Material screenMat;
         private int refreshDrawCountdown;
         private bool startupComplete;
+        private RasterPropMonitorComputer rpmComp;
 
         private readonly Dictionary<string, OdometerMode> modeList = new Dictionary<string, OdometerMode> {
 			{ "LINEAR", OdometerMode.LINEAR },
@@ -81,16 +81,17 @@ namespace JSI
             double thisUpdate = Planetarium.GetUniversalTime();
             float dT = (float)(thisUpdate - lastUpdate) * odometerRotationScalar;
 
-            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
             float value;
             if (!string.IsNullOrEmpty(perPodPersistenceName))
             {
-                bool state = rpmComp.GetBool(perPodPersistenceName, false);
-                value = comp.ProcessVariable((state) ? altVariable : variable).MassageToFloat();
+                bool state = rpmComp.GetPersistentVariable(perPodPersistenceName, false, false);
+                RPMVesselComputer comp = RPMVesselComputer.Instance(rpmComp.vessel);
+                value = rpmComp.ProcessVariable((state) ? altVariable : variable, comp).MassageToFloat();
             }
             else
             {
-                value = comp.ProcessVariable(variable).MassageToFloat();
+                RPMVesselComputer comp = RPMVesselComputer.Instance(rpmComp.vessel);
+                value = rpmComp.ProcessVariable(variable, comp).MassageToFloat();
             }
             // Make sure the value isn't going to be a problem.
             if (float.IsNaN(value))
@@ -386,7 +387,6 @@ namespace JSI
                 screenTexture.Release();
                 screenTexture = null;
             }
-            rpmComp = null;
         }
 
         public void Start()
@@ -399,6 +399,8 @@ namespace JSI
 
             try
             {
+                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
+
                 if (!string.IsNullOrEmpty(odometerMode) && modeList.ContainsKey(odometerMode))
                 {
                     oMode = modeList[odometerMode];
@@ -461,14 +463,12 @@ namespace JSI
                 //Shader unlit = Shader.Find("Hidden/Internal-GUITexture");
                 digitMaterial = new Material(unlit);
 
-                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp);
-
                 backgroundColorValue = ConfigNode.ParseColor32(backgroundColor);
 
                 lastUpdate = Planetarium.GetUniversalTime();
 
                 screenTexture = new RenderTexture(screenPixelWidth, screenPixelHeight, 24, RenderTextureFormat.ARGB32);
-                screenMat = internalProp.FindModelTransform(screenTransform).renderer.material;
+                screenMat = internalProp.FindModelTransform(screenTransform).GetComponent<Renderer>().material;
 
                 foreach (string layerID in textureLayerID.Split())
                 {

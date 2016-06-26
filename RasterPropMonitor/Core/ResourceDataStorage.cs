@@ -27,7 +27,13 @@ namespace JSI
     {
         private readonly ResourceData[] rs;
         private double lastcheck;
-        private const double secondsBetweenSamples = 0.5d;
+        private readonly Dictionary<string, ResourceData> nameResources = new Dictionary<string, ResourceData>();
+        private readonly Dictionary<string, ResourceData> sysrResources = new Dictionary<string, ResourceData>();
+        private readonly string[] sortedResourceNames;
+        private int numValidResourceNames = 0;
+
+        // A dictionary mapping resourceIDs to dictionaries that map 
+        private readonly Dictionary<int, List<PartResource>> activeResources = new Dictionary<int, List<PartResource>>();
 
         private class ResourceComparer : IComparer<ResourceData>
         {
@@ -35,6 +41,11 @@ namespace JSI
             {
                 return string.Compare(a.name, b.name);
             }
+        }
+
+        private static bool IsFreeFlow(ResourceFlowMode flowMode)
+        {
+            return (flowMode == ResourceFlowMode.ALL_VESSEL || flowMode == ResourceFlowMode.ALL_VESSEL_BALANCE || flowMode == ResourceFlowMode.STAGE_PRIORITY_FLOW);
         }
 
         public ResourceDataStorage()
@@ -46,13 +57,21 @@ namespace JSI
             }
 
             rs = new ResourceData[resourceCount];
+            sortedResourceNames = new string[resourceCount];
             int index = 0;
             foreach (PartResourceDefinition thatResource in PartResourceLibrary.Instance.resourceDefinitions)
             {
+                string nameSysr = thatResource.name.ToUpperInvariant().Replace(' ', '-').Replace('_', '-');
+
                 rs[index] = new ResourceData();
                 rs[index].name = thatResource.name;
-                rs[index].nameSysr = thatResource.name.ToUpperInvariant().Replace(' ', '-').Replace('_', '-');
                 rs[index].density = thatResource.density;
+                rs[index].resourceId = thatResource.id;
+
+                activeResources.Add(thatResource.id, new List<PartResource>());
+
+                nameResources.Add(thatResource.name, rs[index]);
+                sysrResources.Add(nameSysr, rs[index]);
                 ++index;
             }
 
@@ -60,77 +79,140 @@ namespace JSI
             Array.Sort(rs, new ResourceComparer());
         }
 
-        public void StartLoop(double time)
+        public void StartLoop()
         {
-            bool updateDeltas = false;
-            float invDeltaT = 1.0f;
-            if (time - lastcheck > secondsBetweenSamples)
-            {
-                updateDeltas = true;
-                invDeltaT = (float)(1.0 / (time - lastcheck));
-            }
-
             for (int i = 0; i < rs.Length; ++i)
             {
-                if (updateDeltas)
-                {
-                    rs[i].delta = (rs[i].previous - rs[i].current) * invDeltaT;
-                    rs[i].previous = rs[i].current;
-                }
                 rs[i].current = 0.0f;
                 rs[i].max = 0.0f;
                 rs[i].stage = 0.0f;
                 rs[i].stagemax = 0.0f;
                 rs[i].ispropellant = false;
 
-            }
-
-            if (updateDeltas)
-            {
-                lastcheck = time;
+                activeResources[rs[i].resourceId].Clear();
             }
         }
 
-        public void MarkPropellant(Propellant propel)
+        public void EndLoop(double time)
         {
-            foreach (PartResource resource in propel.connectedResources)
+            float invDeltaT = (float)(1.0 / (time - lastcheck));
+            for (int i = 0; i < rs.Length; ++i)
             {
-                try
-                {
-                    ResourceData r = Array.Find(rs, t => t.name == resource.info.name);
-                    r.ispropellant = true;
-                }
-                catch (Exception e)
-                {
-                    JUtil.LogErrorMessage(this, "Error in MarkPropellant({0}): {1}", resource.info.name, e);
-                }
+                rs[i].delta = (rs[i].previous - rs[i].current) * invDeltaT;
+                rs[i].previous = rs[i].current;
             }
-        }
+            lastcheck = time;
 
-        public void GetActiveResourceNames(ref string[] result)
-        {
-            int currentIndex = 0;
-            int currentLength = (result == null) ? 0 : result.Length;
+            numValidResourceNames = 0;
             for (int i = 0; i < rs.Length; ++i)
             {
                 if (rs[i].max > 0.0)
                 {
-                    if (currentIndex == currentLength)
+                    sortedResourceNames[numValidResourceNames] = rs[i].name;
+                    ++numValidResourceNames;
+                }
+
+                // See if any engines marked these resources as propellants.
+                // If so, we have stage and stageMax info available, so we can
+                // sum them up.
+                var list = activeResources[rs[i].resourceId];
+                if (list.Count > 0)
+                {
+                    float stage = 0.0f, stageMax = 0.0f;
+
+                    for (int j = 0; j < list.Count; ++j)
                     {
-                        ++currentLength;
-                        Array.Resize(ref result, currentLength);
+                        stage += (float)list[j].amount;
+                        stageMax += (float)list[j].maxAmount;
                     }
-                    if (result[currentIndex] != rs[i].name)
+
+                    rs[i].stage = stage;
+                    rs[i].stagemax = stageMax;
+                }
+            }
+        }
+
+        public string GetActiveResourceByIndex(int index)
+        {
+            return (index < numValidResourceNames) ? sortedResourceNames[index] : string.Empty;
+        }
+        //public void DumpData()
+        //{
+        //    JUtil.LogMessage(this, "Resource data update:");
+        //    for (int i = 0; i < rs.Length; ++i)
+        //    {
+        //        JUtil.LogMessage(this, "{0}: C {1:0.0} / {2:0.0}; T {3:0.0} / {4:0.0}; R {5:0.00}",
+        //            rs[i].name, rs[i].stage, rs[i].current, rs[i].stagemax, rs[i].max, rs[i].delta);
+        //    }
+        //}
+
+        public void MarkPropellant(Propellant propel)
+        {
+            var connectedResources = propel.connectedResources;
+            for (int resourceIdx = 0; resourceIdx < connectedResources.Count; ++resourceIdx)
+            {
+                try
+                {
+                    ResourceData r = nameResources[connectedResources[resourceIdx].info.name];
+                    r.ispropellant = true;
+
+                    // If the resoruce in question isn't a "free flow" -
+                    // that is, an ALL_VESSEL_* resource - then add the
+                    // PartResource to the list we will consider for stage
+                    // resource availability.  But also don't add it if the
+                    // particular PartResource is in the list (as based on
+                    // checking GetHashCode()).
+                    // MOARdV TODO: I *could* make a dictionary instead of list,
+                    // but I don't know if it's worthwhile.
+                    if (!IsFreeFlow(connectedResources[resourceIdx].info.resourceFlowMode))
                     {
-                        result[currentIndex] = rs[i].name;
+                        var list = activeResources[r.resourceId];
+                        bool needsAdded = true;
+                        for (int listIndex = 0; listIndex < list.Count; ++listIndex)
+                        {
+                            if (list[listIndex].GetHashCode() == connectedResources[resourceIdx].GetHashCode())
+                            {
+                                needsAdded = false;
+                                break;
+                            }
+                        }
+                        if (needsAdded)
+                        {
+                            list.Add(connectedResources[resourceIdx]);
+                        }
                     }
-                    ++currentIndex;
+                }
+                catch (Exception e)
+                {
+                    JUtil.LogErrorMessage(this, "Error in MarkPropellant({0}): {1}", connectedResources[resourceIdx].info.name, e);
+                }
+            }
+        }
+
+        public void GetAvailableResourceNames(ref string[] result)
+        {
+            int requiredLength = 0;
+            for (int i = 0; i < rs.Length; ++i)
+            {
+                if (rs[i].max > 0.0)
+                {
+                    requiredLength++;
                 }
             }
 
-            if (currentIndex > 0 && result.Length > currentIndex)
+            if (result == null || result.Length != requiredLength)
             {
-                Array.Resize(ref result, currentIndex);
+                Array.Resize(ref result, requiredLength);
+            }
+
+            int currentIndex = 0;
+            for (int i = 0; i < rs.Length; ++i)
+            {
+                if (rs[i].max > 0.0)
+                {
+                    result[currentIndex] = rs[i].name;
+                    ++currentIndex;
+                }
             }
         }
 
@@ -153,14 +235,16 @@ namespace JSI
             "DENSITY",
             "DELTA",
             "DELTAINV",
-            "MASS",
             "MAXMASS",
+            "MASS",
             "MAX",
-            "PERCENT"
+            "PERCENT",
+            "DEPLETED"
         };
 
         public object ListElement(string resourceQuery)
         {
+            object v = 0.0;
             try
             {
                 int i = 0;
@@ -168,7 +252,6 @@ namespace JSI
                 {
                     if (resourceQuery.EndsWith(keywords[i], StringComparison.Ordinal))
                     {
-                        //JUtil.LogMessage(this, "matched {0} to {1}", resourceQuery, keywords[i]);
                         break;
                     }
                 }
@@ -191,11 +274,8 @@ namespace JSI
                     stage = true;
                     resourceName = resourceName.Substring(0, resourceName.Length - "STAGE".Length);
                 }
-                //JUtil.LogMessage(this, "I think I should chop {0} down to {1}, with valueType {2} and stage {3}",
-                //    resourceQuery, resourceName, valueType, stage);
 
-                ResourceData resource = Array.Find(rs, t => t.nameSysr == resourceName);
-                object v = null;
+                ResourceData resource = sysrResources[resourceName];
                 switch (valueType)
                 {
                     case "":
@@ -230,15 +310,27 @@ namespace JSI
                             v = resource.max > 0 ? resource.current / resource.max : 0d;
                         }
                         break;
+                    case "DEPLETED":
+                        if (stage)
+                        {
+                            bool available = (resource.stagemax > 0.0f && resource.stage < 0.01f);
+                            v = available.GetHashCode();
+                        }
+                        else
+                        {
+                            bool available = (resource.max > 0.0f && resource.current < 0.01f);
+                            v = available.GetHashCode();
+                        }
+                        break;
                 }
 
-                return v;
             }
             catch (Exception e)
             {
-                JUtil.LogErrorMessage(this, "ListElement({1}) threw exception {0}", e, resourceQuery);
+                JUtil.LogErrorMessage(this, "ListElement({1}) threw trapped exception {0}", e, resourceQuery);
+                v = null;
             }
-            return null;
+            return v;
         }
 
         public object ListElement(string resourceName, string valueType, bool stage)
@@ -247,7 +339,7 @@ namespace JSI
 
             try
             {
-                ResourceData resource = Array.Find(rs, t => t.name == resourceName);
+                ResourceData resource = nameResources[resourceName];
 
                 switch (valueType)
                 {
@@ -297,9 +389,16 @@ namespace JSI
         {
             try
             {
-                ResourceData res = Array.Find(rs, t => t.name == resource.info.name);
+                ResourceData res = nameResources[resource.info.name];
                 res.current += (float)resource.amount;
                 res.max += (float)resource.maxAmount;
+
+                var flowmode = resource.info.resourceFlowMode;
+                if (IsFreeFlow(flowmode))
+                {
+                    res.stage += (float)resource.amount;
+                    res.stagemax += (float)resource.maxAmount;
+                }
             }
             catch (Exception e)
             {
@@ -311,9 +410,11 @@ namespace JSI
         {
             try
             {
-                ResourceData res = Array.Find(rs, t => t.name == resource.info.name);
+                ResourceData res = nameResources[resource.info.name];
                 res.stage = (float)resource.amount;
                 res.stagemax = (float)resource.maxAmount;
+                var list = activeResources[resource.info.id];
+                list.Clear();
             }
             catch (Exception e)
             {
@@ -324,15 +425,18 @@ namespace JSI
         private class ResourceData
         {
             public string name;
-            public string nameSysr;
 
             public float current;
             public float max;
             public float previous;
+
             public float stage;
             public float stagemax;
+
             public float density;
             public float delta;
+
+            public int resourceId;
 
             public bool ispropellant;
         }

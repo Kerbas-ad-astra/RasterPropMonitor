@@ -32,8 +32,9 @@ namespace JSI
             kacFound = KACWrapper.InitKACWrapper();
         }
 
-        public JSIKAC()
+        public JSIKAC(Vessel myVessel)
         {
+            vessel = myVessel;
             JUtil.LogMessage(this, "A supported version of Kerbal Alarm Clock is {0}", (kacFound) ? "present" : "not available");
         }
 
@@ -44,7 +45,6 @@ namespace JSI
             if (kacFound)
             {
                 var alarms = KACWrapper.KAC.Alarms;
-                //alarms.Sort(SortDates);
 
                 string id = vessel.id.ToString();
                 int vesselAlarmCount = 0;
@@ -123,11 +123,6 @@ namespace JSI
             }
 
             return name;
-        }
-
-        private int SortDates(KACWrapper.KACAPI.KACAlarm x, KACWrapper.KACAPI.KACAlarm y)
-        {
-            return x.AlarmTime.CompareTo(y.AlarmTime);
         }
     }
 }

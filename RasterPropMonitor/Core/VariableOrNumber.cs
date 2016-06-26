@@ -24,99 +24,138 @@ namespace JSI
 {
     public class VariableOrNumber
     {
-        private readonly string variableName;
-        private float value;
-        private bool warningMade;
-
-        static private Dictionary<string, VariableOrNumber> vars = new Dictionary<string, VariableOrNumber>();
+        internal readonly string variableName;
+        internal double numericValue;
+        internal string stringValue;
+        internal bool isNumeric;
+        private readonly RasterPropMonitorComputer rpmComp;
+        internal VoNType variableType = VoNType.Invalid;
+        internal enum VoNType
+        {
+            Invalid,
+            ConstantNumeric,
+            ConstantString,
+            VariableValue,
+        }
 
         /// <summary>
-        /// Create a new VariableOrNumber, or return an existing one that
-        /// tracks the same value.
+        /// Initialize a VariableOrNumber
         /// </summary>
-        /// <param name="input"></param>
-        /// <returns></returns>
-        public static VariableOrNumber Instantiate(string input)
+        /// <param name="input">The name of the variable</param>
+        /// <param name="cacheable">Whether the variable is cacheable</param>
+        /// <param name="rpmComp">The RasterPropMonitorComputer that owns the variable</param>
+        internal VariableOrNumber(string input, bool cacheable, RasterPropMonitorComputer rpmComp_)
         {
             string varName = input.Trim();
-            float floatval;
-            if(float.TryParse(varName, out floatval))
+            if (varName == "MetersToFeet")
+            {
+                varName = RPMGlobals.MetersToFeet.ToString();
+            }
+            else if (varName == "MetersPerSecondToKnots")
+            {
+                varName = RPMGlobals.MetersPerSecondToKnots.ToString();
+            }
+            else if (varName == "MetersPerSecondToFeetPerMinute")
+            {
+                varName = RPMGlobals.MetersPerSecondToFeetPerMinute.ToString();
+            }
+
+            float realValue;
+            if (float.TryParse(varName, out realValue))
             {
                 // If it's a numeric value, let's canonicalize it using
                 // ToString, so we don't have duplicates that evaluate to the
                 // same value (eg, 1.0, 1, 1.00, etc).
-                varName = floatval.ToString();
+                variableName = realValue.ToString();
+                numericValue = realValue;
+                isNumeric = true;
+                variableType = VoNType.ConstantNumeric;
             }
-
-            if (varName == "MetersToFeet")
+            else if (input[0] == '$')
             {
-                varName = RPMVesselComputer.MetersToFeet.ToString();
-            }
-            else if (varName == "MetersPerSecondToKnots")
-            {
-                varName = RPMVesselComputer.MetersPerSecondToKnots.ToString();
-            }
-            else if (varName == "MetersPerSecondToFeetPerMinute")
-            {
-                varName = RPMVesselComputer.MetersPerSecondToFeetPerMinute.ToString();
-            }
-
-            if(!vars.ContainsKey(varName))
-            {
-                VariableOrNumber VoN = new VariableOrNumber(varName);
-                vars.Add(varName, VoN);
-                //JUtil.LogMessage(null, "Adding VoN {0}", varName);
-            }
-            return vars[varName];
-        }
-
-        /// <summary>
-        /// Used by RPMVesselComputer to signal that we no longer need the
-        /// cache of variables.
-        /// </summary>
-        internal static void Clear()
-        {
-            vars.Clear();
-        }
-
-        private VariableOrNumber(string input)
-        {
-            float realValue;
-            if (float.TryParse(input, out realValue))
-            {
-                value = realValue;
+                variableName = input;
+                stringValue = input.Substring(1).Trim();
+                isNumeric = false;
+                variableType = VoNType.ConstantString;
             }
             else
             {
-                variableName = input.Trim();
+                variableName = varName;
+                variableType = VoNType.VariableValue;
+
+                if (!cacheable)
+                {
+                    rpmComp = rpmComp_;
+                }
             }
         }
 
         /// <summary>
-        /// Evaluate the variable, returning it in destination.
+        /// Return the value as a float.
         /// </summary>
-        /// <param name="destination"></param>
-        /// <param name="comp"></param>
         /// <returns></returns>
-        public bool Get(out float destination, RPMVesselComputer comp)
+        public float AsFloat()
         {
-            if (!string.IsNullOrEmpty(variableName))
+            if (rpmComp != null)
             {
-                value = comp.ProcessVariable(variableName).MassageToFloat();
-                if (float.IsNaN(value) || float.IsInfinity(value))
-                {
-                    if (!warningMade)
-                    {
-                        JUtil.LogMessage(this, "Warning: {0} can fail to produce a usable number.", variableName);
-                        warningMade = true;
-                    }
-                    destination = value;
-                    return false;
-                }
+                return rpmComp.ProcessVariable(variableName, null).MassageToFloat();
             }
+            else
+            {
+                return (float)numericValue;
+            }
+        }
 
-            destination = value;
-            return true;
+        /// <summary>
+        /// Returns the value as a double.
+        /// </summary>
+        /// <returns></returns>
+        public double AsDouble()
+        {
+            if (rpmComp != null)
+            {
+                return rpmComp.ProcessVariable(variableName, null).MassageToDouble();
+            }
+            else
+            {
+                return numericValue;
+            }
+        }
+
+        /// <summary>
+        /// Returns the value as an int.
+        /// </summary>
+        /// <returns></returns>
+        public int AsInt()
+        {
+            if (rpmComp != null)
+            {
+                return rpmComp.ProcessVariable(variableName, null).MassageToInt();
+            }
+            else
+            {
+                return (int)numericValue;
+            }
+        }
+
+        /// <summary>
+        /// Return the value boxed as an object
+        /// </summary>
+        /// <returns></returns>
+        public object Get()
+        {
+            if (rpmComp != null)
+            {
+                return rpmComp.ProcessVariable(variableName, null);
+            }
+            else if (isNumeric)
+            {
+                return numericValue;
+            }
+            else
+            {
+                return stringValue;
+            }
         }
     }
 
@@ -130,27 +169,55 @@ namespace JSI
         VariableOrNumber sourceValue;
         VariableOrNumber lowerBound;
         VariableOrNumber upperBound;
+        VariableOrNumber modulo;
 
-        public VariableOrNumberRange(string sourceVariable, string range1, string range2)
+        public string variableName
         {
-            sourceValue = VariableOrNumber.Instantiate(sourceVariable);
-            lowerBound = VariableOrNumber.Instantiate(range1);
-            upperBound = VariableOrNumber.Instantiate(range2);
+            get
+            {
+                return sourceValue.variableName;
+            }
         }
 
-        public bool InverseLerp(RPMVesselComputer comp, out float scaledValue)
+        public VariableOrNumberRange(RasterPropMonitorComputer rpmComp, string sourceVariable, string range1, string range2, string moduloVariable = null)
         {
-            float value;
-            float low, high;
-            if (!(sourceValue.Get(out value, comp) && lowerBound.Get(out low, comp) && upperBound.Get(out high, comp)))
+            sourceValue = rpmComp.InstantiateVariableOrNumber(sourceVariable);
+            lowerBound = rpmComp.InstantiateVariableOrNumber(range1);
+            upperBound = rpmComp.InstantiateVariableOrNumber(range2);
+            if (!string.IsNullOrEmpty(moduloVariable))
             {
-                scaledValue = 0.0f;
-                return false;
+                modulo = rpmComp.InstantiateVariableOrNumber(moduloVariable);
+            }
+        }
+
+        /// <summary>
+        /// Return a value in the range of 0 to 1 representing where the current variable
+        /// evaluates within its range.
+        /// </summary>
+        /// <returns></returns>
+        public float InverseLerp()
+        {
+            float value = sourceValue.AsFloat();
+            float low = lowerBound.AsFloat();
+            float high = upperBound.AsFloat();
+
+            if (modulo != null)
+            {
+                float mod = modulo.AsFloat();
+
+                float scaledValue = Mathf.InverseLerp(low, high, value);
+                float range = Mathf.Abs(high - low);
+                if (range > 0.0f)
+                {
+                    float modDivRange = mod / range;
+                    scaledValue = (scaledValue % (modDivRange)) / modDivRange;
+                }
+                //value = value % mod;
+                return scaledValue;
             }
             else
             {
-                scaledValue = Mathf.InverseLerp(low, high, value);
-                return true;
+                return Mathf.InverseLerp(low, high, value);
             }
         }
 
@@ -159,18 +226,36 @@ namespace JSI
         /// variable is in range.
         /// </summary>
         /// <param name="comp"></param>
-        /// <param name="persistence"></param>
         /// <returns></returns>
-        public bool IsInRange(RPMVesselComputer comp)
+        public bool IsInRange()
         {
-            float value;
-            float low, high;
+            float value = sourceValue.AsFloat();
+            float low = lowerBound.AsFloat();
+            float high = upperBound.AsFloat();
 
-            if(!(sourceValue.Get(out value, comp) && lowerBound.Get(out low, comp) && upperBound.Get(out high, comp)))
+            if (high < low)
             {
-                return false;
+                return (value >= high && value <= low);
             }
-            else if (high < low)
+            else
+            {
+                return (value >= low && value <= high);
+            }
+        }
+
+        /// <summary>
+        /// Provides a simple boolean true/false for whether the named
+        /// variable is in range.
+        /// </summary>
+        /// <param name="comp"></param>
+        /// <param name="value">The value to test (provided externally)</param>
+        /// <returns></returns>
+        public bool IsInRange(float value)
+        {
+            float low = lowerBound.AsFloat();
+            float high = upperBound.AsFloat();
+
+            if (high < low)
             {
                 return (value >= high && value <= low);
             }

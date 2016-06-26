@@ -1,4 +1,23 @@
-// Analysis disable once RedundantUsingDirective
+/*****************************************************************************
+ * RasterPropMonitor
+ * =================
+ * Plugin for Kerbal Space Program
+ *
+ *  by Mihara (Eugene Medvedev), MOARdV, and other contributors
+ * 
+ * RasterPropMonitor is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, revision
+ * date 29 June 2007, or (at your option) any later version.
+ * 
+ * RasterPropMonitor is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+ * for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
+ ****************************************************************************/
 using System;
 using UnityEngine;
 
@@ -25,8 +44,7 @@ namespace JSI
         private readonly Camera[] cameraObject = { null, null, null, null, null, null, null };
         private readonly float cameraAspect;
         private bool enabled;
-        private readonly RenderTexture screenTexture;
-        private bool isReferenceCamera, isReferenceClawCamera;
+        private bool isReferenceCamera, isReferenceClawCamera, isReferenceTransformCamera;
         private ModuleGrappleNode clawModule;
         private Part referencePart;
         private const string referenceCamera = "CurrentReferenceDockingPortCamera";
@@ -37,11 +55,10 @@ namespace JSI
 
         public float FOV { get; set; }
 
-        public FlyingCamera(Part thatPart, RenderTexture screen, float aspect)
+        public FlyingCamera(Part thatPart, float aspect)
         {
             ourVessel = thatPart.vessel;
             ourPart = thatPart;
-            screenTexture = screen;
             cameraAspect = aspect;
         }
 
@@ -82,36 +99,45 @@ namespace JSI
             referencePart = ourVessel.GetReferenceTransformPart();
             ModuleDockingNode thatPort = null;
             ModuleGrappleNode thatClaw = null;
-            foreach (PartModule thatModule in ourVessel.GetReferenceTransformPart().Modules)
+            if (referencePart != null)
             {
-                thatPort = thatModule as ModuleDockingNode;
-                thatClaw = thatModule as ModuleGrappleNode;
-                if (thatPort != null || thatClaw != null)
-                    break;
+                foreach (PartModule thatModule in referencePart.Modules)
+                {
+                    thatPort = thatModule as ModuleDockingNode;
+                    thatClaw = thatModule as ModuleGrappleNode;
+                    if (thatPort != null || thatClaw != null)
+                    {
+                        break;
+                    }
+                }
             }
-            if (thatPort != null || thatClaw != null)
+
+            if (thatPort != null)
             {
-                if (thatPort != null)
+                if (!LocateCamera(referencePart, "dockingNode"))
                 {
                     cameraPart = thatPort.part;
                     cameraTransform = ourVessel.ReferenceTransform.gameObject;
-                    isReferenceClawCamera = false;
+                    isReferenceTransformCamera = true;
                 }
-                else if (thatClaw != null)
+                isReferenceClawCamera = false;
+                return CreateCameraObjects();
+            }
+            else if (thatClaw != null)
+            {
+                // Mihara: Dirty hack to get around the fact that claws have their reference transform inside the structure.
+                if (LocateCamera(referencePart, "ArticulatedCap"))
                 {
-                    // Mihara: Dirty hack to get around the fact that claws have their reference transform inside the structure.
-                    if (LocateCamera(ourVessel.GetReferenceTransformPart(), "ArticulatedCap"))
-                    {
-                        isReferenceClawCamera = true;
-                        clawModule = thatClaw;
-                    }
-                    else
-                    {
-                        JUtil.LogMessage(this, "Claw was not a stock part. Falling back to reference transform position...");
-                        cameraPart = thatClaw.part;
-                        cameraTransform = ourVessel.ReferenceTransform.gameObject;
-                    }
+                    isReferenceClawCamera = true;
+                    clawModule = thatClaw;
                 }
+                else
+                {
+                    JUtil.LogMessage(this, "Claw was not a stock part. Falling back to reference transform position...");
+                    cameraPart = thatClaw.part;
+                    cameraTransform = ourVessel.ReferenceTransform.gameObject;
+                }
+
                 return CreateCameraObjects();
             }
             else
@@ -122,7 +148,6 @@ namespace JSI
 
         private bool CreateCameraObjects(string newCameraName = null)
         {
-
             if (!string.IsNullOrEmpty(newCameraName))
             {
                 isReferenceCamera = false;
@@ -209,16 +234,28 @@ namespace JSI
 
                 cameraObject[index].CopyFrom(sourceCam);
                 cameraObject[index].enabled = false;
-                cameraObject[index].targetTexture = screenTexture;
                 cameraObject[index].aspect = cameraAspect;
+
+                // Minor hack to bring the near clip plane for the "up close"
+                // cameras drastically closer to where the cameras notionally
+                // are.  Experimentally, these two cameras have N/F of 0.4 / 300.0,
+                // or 750:1 Far/Near ratio.  Changing this to 8192:1 brings the
+                // near plane to 37cm or so, which hopefully is close enough to
+                // see nearby details without creating z-fighting artifacts.
+                if (index == 5 || index == 6)
+                {
+                    cameraObject[index].nearClipPlane = cameraObject[index].farClipPlane / 8192.0f;
+                }
             }
         }
 
         public Quaternion CameraRotation(float yawOffset = 0.0f, float pitchOffset = 0.0f)
         {
             Quaternion rotation = cameraTransform.transform.rotation;
-            if (isReferenceCamera)
+            if (isReferenceTransformCamera)
+            {
                 rotation *= referencePointRotation;
+            }
             Quaternion offset = Quaternion.Euler(new Vector3(pitchOffset, yawOffset, 0.0f));
             return rotation * offset;
         }
@@ -230,10 +267,10 @@ namespace JSI
 
         public Vector3 GetTransformForward()
         {
-            return isReferenceCamera ? cameraTransform.transform.up : cameraTransform.transform.forward;
+            return isReferenceTransformCamera ? cameraTransform.transform.up : cameraTransform.transform.forward;
         }
 
-        public bool Render(float yawOffset = 0.0f, float pitchOffset = 0.0f)
+        public bool Render(RenderTexture screen, float yawOffset, float pitchOffset)
         {
 
             if (isReferenceCamera && ourVessel.GetReferenceTransformPart() != referencePart)
@@ -272,7 +309,7 @@ namespace JSI
 
             Quaternion rotation = cameraTransform.transform.rotation;
 
-            if (isReferenceCamera && !isReferenceClawCamera)
+            if (isReferenceTransformCamera)
             {
                 // Reference transforms of docking ports have the wrong orientation, so need an extra rotation applied before that.
                 rotation *= referencePointRotation;
@@ -313,11 +350,12 @@ namespace JSI
             {
                 if (cameraObject[i] != null)
                 {
-                    // ScaledSpace camera and it's derived cameras from Visual Enhancements mod are special - they don't move.
+                    // ScaledSpace camera and its derived cameras from Visual Enhancements mod are special - they don't move.
                     if (i >= 3)
                     {
                         cameraObject[i].transform.position = cameraTransform.transform.position;
                     }
+                    cameraObject[i].targetTexture = screen;
                     cameraObject[i].transform.rotation = rotation;
                     cameraObject[i].fieldOfView = FOV;
                     cameraObject[i].Render();

@@ -23,7 +23,7 @@ using System.Collections.Generic;
 
 namespace JSI
 {
-    public partial class RPMVesselComputer : VesselModule
+    public partial class RasterPropMonitorComputer : PartModule
     {
         internal class TriggeredEventTemplate
         {
@@ -106,7 +106,7 @@ namespace JSI
             // Once armed, has it been triggered?
             bool triggered;
 
-            internal TriggeredEvent(TriggeredEventTemplate template, RPMVesselComputer comp)
+            internal TriggeredEvent(TriggeredEventTemplate template, RasterPropMonitorComputer rpmComp)
             {
                 eventName = template.eventName;
                 if (string.IsNullOrEmpty(eventName))
@@ -123,7 +123,7 @@ namespace JSI
                 {
                     throw new Exception("TriggeredEvent: tokens not valid");
                 }
-                variable = new VariableOrNumberRange(template.variableName, tokens[0], tokens[1]);
+                variable = new VariableOrNumberRange(rpmComp, template.variableName, tokens[0], tokens[1]);
 
                 if (JSIActionGroupSwitch.groupList.ContainsKey(template.triggerEvent))
                 {
@@ -133,7 +133,7 @@ namespace JSI
                 else
                 {
                     isPluginAction = true;
-                    pluginAction = (Action<bool>)comp.GetInternalMethod(template.triggerEvent, typeof(Action<bool>));
+                    pluginAction = (Action<bool>)rpmComp.GetInternalMethod(template.triggerEvent, typeof(Action<bool>));
 
                     if (pluginAction == null)
                     {
@@ -155,7 +155,7 @@ namespace JSI
 
                     if (isPluginAction)
                     {
-                        pluginState = (Func<bool>)comp.GetInternalMethod(template.eventState, typeof(Func<bool>));
+                        pluginState = (Func<bool>)rpmComp.GetInternalMethod(template.eventState, typeof(Func<bool>));
                         if (pluginState == null)
                         {
                             throw new Exception("TriggeredEvent: Unable to initialize pluginState");
@@ -182,9 +182,9 @@ namespace JSI
                 JUtil.LogMessage(this, "Triggered Event {0} created", eventName);
             }
 
-            internal void Update(RPMVesselComputer comp)
+            internal void Update(Vessel vessel)
             {
-                bool inRange = variable.IsInRange(comp);
+                bool inRange = variable.IsInRange();
                 if (armed)
                 {
                     if (inRange)
@@ -194,7 +194,7 @@ namespace JSI
                             JUtil.LogMessage(this, "Event {0} triggered", eventName);
                             triggered = true;
                             armed = oneShot;
-                            DoEvent(comp.vessel);
+                            DoEvent(vessel);
                         }
                     }
                 }
@@ -246,11 +246,11 @@ namespace JSI
                 }
             }
 
-            for (int i = 0; i < triggeredEvents.Count; ++i)
+            for (int i = 0; i < RPMGlobals.triggeredEvents.Count; ++i)
             {
-                if (triggeredEvents[i].eventName == eventName)
+                if (RPMGlobals.triggeredEvents[i].eventName == eventName)
                 {
-                    activeTriggeredEvents.Add(new TriggeredEvent(triggeredEvents[i], this));
+                    activeTriggeredEvents.Add(new TriggeredEvent(RPMGlobals.triggeredEvents[i], this));
                 }
             }
         }

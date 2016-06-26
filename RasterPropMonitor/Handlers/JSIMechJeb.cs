@@ -33,8 +33,6 @@ namespace JSI
     internal class JSIMechJeb : IJSIModule
     {
         #region Reflection Definitions
-        // MechJebCore
-        private static readonly Type mjMechJebCore_t;
         // MechJebCore.GetComputerModule(string)
         private static readonly DynamicMethodDelegate getComputerModule;
         // MechJebCore.target
@@ -150,6 +148,8 @@ namespace JSI
 
         // Ascent Autopilot
         private static readonly FieldInfo launchOrbitAltitude;
+        // Ascent Guidance
+        private static readonly FieldInfo launchOrbitInclination;
 
         // EditableDoubleMult
         private static readonly DynamicMethodDelegate setEditableDoubleMult;
@@ -175,6 +175,7 @@ namespace JSI
         // OrbitalManeuverCalculator.DeltaVAndTimeForInterplanetaryTransferEjection
         private static readonly MethodInfo mjDeltaVAndTimeForInterplanetaryTransferEjection;
         //private static readonly DynamicMethodDelegate deltaVAndTimeForInterplanetaryTransferEjection;
+        private static readonly MethodInfo mjDeltaVToMatchVelocities;
         // OrbitalManeuverCalculator.DeltaVToCircularize
         private static readonly DynamicMethodDelegate deltaVToCircularize;
         // OrbitalManeuverCalculator.DeltaVToChangeApoapsis
@@ -258,6 +259,7 @@ namespace JSI
 
         static JSIMechJeb()
         {
+            Type mjMechJebCore_t = null;
             try
             {
                 var loadedMechJebAssy = AssemblyLoader.loadedAssemblies.FirstOrDefault(a => a.name == "MechJeb2");
@@ -423,7 +425,7 @@ namespace JSI
                 // MOARdV TODO: when the next version of MJ is out, this will be the only way to engage
                 // the AP, so we will want to throw an exception if aapEngaged is null.
                 PropertyInfo aapEngaged = mjMechJebModuleAscentAutopilot_t.GetProperty("Engaged");
-                if(aapEngaged != null)
+                if (aapEngaged != null)
                 {
                     MethodInfo getter = aapEngaged.GetGetMethod();
                     getAscentAutopilotEngaged = DynamicMethodDelegateFactory.CreateFuncBool(getter);
@@ -438,6 +440,18 @@ namespace JSI
                     {
                         throw new NotImplementedException("setAscentAutopilotEngaged");
                     }
+                }
+                // MechJebModuleAscentAutopilot
+                Type mjMechJebModuleAscentGuidance_t = loadedMechJebAssy.assembly.GetExportedTypes()
+                    .SingleOrDefault(t => t.FullName == "MuMech.MechJebModuleAscentGuidance");
+                if (mjMechJebModuleAscentGuidance_t == null)
+                {
+                    throw new NotImplementedException("mjMechJebModuleAscentGuidance_t");
+                }
+                launchOrbitInclination = mjMechJebModuleAscentGuidance_t.GetField("desiredInclination");
+                if (launchOrbitInclination == null)
+                {
+                    throw new NotImplementedException("launchOrbitInclination");
                 }
 
                 Type mjEditableDoubleMult_t = loadedMechJebAssy.assembly.GetExportedTypes()
@@ -705,6 +719,11 @@ namespace JSI
                     throw new NotImplementedException("mjDeltaVAndTimeForHohmannTransfer");
                 }
                 //deltaVAndTimeForHohmannTransfer = DynamicMethodDelegateFactory.Create(mjDeltaVAndTimeForHohmannTransfer);
+                mjDeltaVToMatchVelocities = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVToMatchVelocities", BindingFlags.Static | BindingFlags.Public);
+                if (mjDeltaVToMatchVelocities == null)
+                {
+                    throw new NotImplementedException("mjDeltaVToMatchVelocities");
+                }
                 mjDeltaVAndTimeForInterplanetaryTransferEjection = mjOrbitalManeuverCalculator_t.GetMethod("DeltaVAndTimeForInterplanetaryTransferEjection", BindingFlags.Static | BindingFlags.Public);
                 if (mjDeltaVAndTimeForInterplanetaryTransferEjection == null)
                 {
@@ -829,8 +848,9 @@ namespace JSI
             }
         }
 
-        public JSIMechJeb()
+        public JSIMechJeb(Vessel myVessel)
         {
+            vessel = myVessel;
             JUtil.LogMessage(this, "A supported version of MechJeb is {0}", (mjFound) ? "present" : "not available");
         }
 
@@ -1004,7 +1024,7 @@ namespace JSI
             {
                 object stagestats = GetComputerModule(activeJeb, "MechJebModuleStageStats");
 
-                requestUpdate(stagestats, new object[] { this });
+                requestUpdate(stagestats, new object[] { this, false });
 
                 int atmStatsLength = 0, vacStatsLength = 0;
 
@@ -1074,7 +1094,7 @@ namespace JSI
             return (activeJeb != null);
         }
 
-        internal void SetSmartassMode(Target t)
+        public void SetSmartassMode(Target t)
         {
             EnactTargetAction(vessel, t);
         }
@@ -1170,7 +1190,7 @@ namespace JSI
             {
                 UpdateLandingStats(activeJeb);
 
-                return landingTime - Planetarium.GetUniversalTime();
+                return Math.Max(0.0, landingTime - Planetarium.GetUniversalTime());
             }
             else
             {
@@ -1269,6 +1289,30 @@ namespace JSI
                 {
                     setEditableDoubleMult(desiredAlt, new object[] { altitude });
                 }
+            }
+        }
+
+        public double GetLaunchInclination()
+        {
+            double angle = 0.0;
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ascent = GetComputerModule(activeJeb, "MechJebModuleAscentGuidance");
+            if (ascent != null)
+            {
+                object inclination = launchOrbitInclination.GetValue(ascent);
+                angle = getEditableDouble(inclination);
+            }
+            return angle;
+        }
+
+        public void SetLaunchInclination(double inclination)
+        {
+            object activeJeb = GetMasterMechJeb(vessel);
+            object ascent = GetComputerModule(activeJeb, "MechJebModuleAscentGuidance");
+            if (ascent != null)
+            {
+                object incline = launchOrbitInclination.GetValue(ascent);
+                setEditableDouble(incline, new object[] { inclination });
             }
         }
 
@@ -1403,13 +1447,7 @@ namespace JSI
 
                 dV = (Vector3d)deltaVToCircularize(null, new object[] { vessel.orbit, UT });
 
-                if (vessel.patchedConicSolver != null)
-                {
-                    while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
-                    {
-                        vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
-                    }
-                }
+                JUtil.RemoveAllNodes(vessel.patchedConicSolver);
 
                 placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
             }
@@ -1425,13 +1463,7 @@ namespace JSI
 
                 dV = (Vector3d)deltaVToChangeApoapsis(null, new object[] { vessel.orbit, UT, vessel.orbit.referenceBody.Radius + altitude });
 
-                if (vessel.patchedConicSolver != null)
-                {
-                    while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
-                    {
-                        vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
-                    }
-                }
+                JUtil.RemoveAllNodes(vessel.patchedConicSolver);
 
                 placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
             }
@@ -1447,13 +1479,7 @@ namespace JSI
 
                 dV = (Vector3d)deltaVToChangePeriapsis(null, new object[] { vessel.orbit, UT, vessel.orbit.referenceBody.Radius + altitude });
 
-                if (vessel.patchedConicSolver != null)
-                {
-                    while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
-                    {
-                        vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
-                    }
-                }
+                JUtil.RemoveAllNodes(vessel.patchedConicSolver);
 
                 placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
             }
@@ -1465,13 +1491,7 @@ namespace JSI
 
             dV = (Vector3d)deltaVToCircularize(null, new object[] { vessel.orbit, UT });
 
-            if (vessel.patchedConicSolver != null)
-            {
-                while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
-                {
-                    vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
-                }
-            }
+            JUtil.RemoveAllNodes(vessel.patchedConicSolver);
 
             placeManeuverNode(null, new object[] { vessel, vessel.orbit, dV, UT });
         }
@@ -1650,7 +1670,7 @@ namespace JSI
                     }
 
                     object agPilot = GetComputerModule(activeJeb, "MechJebModuleAscentGuidance");
-                    if(agPilot == null)
+                    if (agPilot == null)
                     {
                         JUtil.LogErrorMessage(this, "Unable to fetch MechJebModuleAscentGuidance");
                         return;
@@ -1761,13 +1781,7 @@ namespace JSI
                 nodeUT = (double)args[4];
             }
 
-            if (vessel.patchedConicSolver != null)
-            {
-                while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
-                {
-                    vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
-                }
-            }
+            JUtil.RemoveAllNodes(vessel.patchedConicSolver);
 
             placeManeuverNode(null, new object[] { vessel, o, dV, nodeUT });
         }
@@ -2170,6 +2184,77 @@ namespace JSI
             else
             {
                 return false;
+            }
+        }
+
+        public void MatchVelocities(bool state)
+        {
+            if (!MatchVelocitiesState())
+            {
+                return;
+            }
+
+            try
+            {
+                object activeJeb = GetMasterMechJeb(vessel);
+                if (activeJeb == null)
+                {
+                    return;
+                }
+
+                object target = mjCoreTarget.GetValue(activeJeb);
+                if (target == null)
+                {
+                    return;
+                }
+
+                Orbit targetOrbit = (Orbit)getTargetOrbit(target);
+                Orbit o = vessel.orbit;
+                Vector3d dV;
+                double nodeUT;// closest approach time
+                JUtil.GetClosestApproach(o, targetOrbit, out nodeUT);
+
+                object[] args = new object[] { o, nodeUT, targetOrbit };
+                dV = (Vector3d)mjDeltaVToMatchVelocities.Invoke(null, args);
+
+                JUtil.RemoveAllNodes(vessel.patchedConicSolver);
+
+                placeManeuverNode(null, new object[] { vessel, o, dV, nodeUT });
+            }
+            catch (Exception e)
+            {
+                JUtil.LogErrorMessage(this, "MatchVelocities tripped an exception: {0}", e);
+            }
+        }
+
+        public bool MatchVelocitiesState()
+        {
+            if (!mjFound)
+            {
+                return false;
+            }
+
+            object activeJeb = GetMasterMechJeb(vessel);
+            if (activeJeb == null)
+            {
+                return false;
+            }
+
+            object target = mjCoreTarget.GetValue(activeJeb);
+            if (target == null)
+            {
+                return false;
+            }
+
+            // Most of these conditions are directly from MJ, or derived from
+            // it.
+            if (getNormalTargetExists(target) == false)
+            {
+                return false;
+            }
+            else
+            {
+                return true;
             }
         }
 

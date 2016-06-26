@@ -25,413 +25,77 @@ namespace JSI
 {
     public partial class RPMVesselComputer : VesselModule
     {
-        // Plugin-modifiable Evaluators
-        //private Func<bool> evaluateMechJebAvailable;
-        private Func<double> evaluateAngleOfAttack;
-        //private Func<double> evaluateDeltaV;
-        //private Func<double> evaluateDeltaVStage;
-        //private Func<double> evaluateDragForce;
-        //private Func<double> evaluateLandingError;
-        //private Func<double> evaluateLandingAltitude;
-        //private Func<double> evaluateLandingLatitude;
-        //private Func<double> evaluateLandingLongitude;
-        //private Func<double> evaluateLiftForce;
-        private Func<double> evaluateSideSlip;
-        private Func<double> evaluateTerminalVelocity;
-        private Func<double> evaluateTimeToImpact;
-
-        //--- Plugin-enabled evaluators
-        #region PluginEvaluators
-        private float EvaluateAngleOfAttack()
+        /// <summary>
+        /// Do a "broadcast" GetPersistentVariable, where we iterate over every
+        /// part in the craft and find each RasterPropMonitorComputer.  Return
+        /// the value from the first one that contains the variable, or the
+        /// default value otherwise.
+        /// </summary>
+        /// <param name="name"></param>
+        /// <param name="defaultValue"></param>
+        /// <returns></returns>
+        internal object GetPersistentVariable(string name, object defaultValue)
         {
-            if (evaluateAngleOfAttack == null)
+            if (vessel != null)
             {
-                Func<double> accessor = null;
-
-                accessor = (Func<double>)GetInternalMethod("JSIFAR:GetAngleOfAttack", typeof(Func<double>));
-                if (accessor != null)
+                for (int partIdx = 0; partIdx < vessel.parts.Count; ++partIdx)
                 {
-                    double value = accessor();
-                    if (double.IsNaN(value))
+                    RasterPropMonitorComputer rpmc = RasterPropMonitorComputer.Instantiate(vessel.parts[partIdx], false);
+                    if(rpmc.HasPersistentVariable(name, false))
                     {
-                        accessor = null;
+                        return rpmc.GetPersistentVariable(name, defaultValue, false);
                     }
                 }
+            }
 
-                if (accessor == null)
+            return defaultValue;
+        }
+
+        /// <summary>
+        /// Iterate over every part in the craft to see if any
+        /// RasterPropMonitorComputer instances have the specified persistent
+        /// variable.
+        /// </summary>
+        /// <param name="name"></param>
+        /// <returns></returns>
+        internal bool HasPersistentVariable(string name)
+        {
+            if (vessel != null)
+            {
+                for (int partIdx = 0; partIdx < vessel.parts.Count; ++partIdx)
                 {
-                    evaluateAngleOfAttack = FallbackEvaluateAngleOfAttack;
-                }
-                else
-                {
-                    evaluateAngleOfAttack = accessor;
-                }
-            }
-
-            return (float)evaluateAngleOfAttack();
-        }
-
-        private VariableEvaluator AngleOfAttack()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIFAR:GetAngleOfAttack", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return FallbackEvaluateAngleOfAttack(); };
-            }
-            else
-            {
-                return (string variable) => { return accessor(); };
-            }
-        }
-
-        private VariableEvaluator DeltaV()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetDeltaV", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return (actualAverageIsp * gee) * Math.Log(totalShipWetMass / (totalShipWetMass - resources.PropellantMass(false))); };
-            }
-            else
-            {
-                return (string variable) => { return accessor(); };
-            }
-        }
-
-        private VariableEvaluator DeltaVStage()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetStageDeltaV", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return (actualAverageIsp * gee) * Math.Log(totalShipWetMass / (totalShipWetMass - resources.PropellantMass(true))); };
-            }
-            else
-            {
-                return (string variable) => { return accessor(); };
-            }
-        }
-
-        private VariableEvaluator DragAccel()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIFAR:GetDragForce", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return FallbackEvaluateDragForce() / totalShipWetMass; };
-            }
-            else
-            {
-                return (string variable) => { return accessor() / totalShipWetMass; };
-            }
-        }
-
-        private VariableEvaluator DragForce()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIFAR:GetDragForce", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return FallbackEvaluateDragForce(); };
-            }
-            else
-            {
-                return (string variable) => { return accessor(); };
-            }
-        }
-
-        private VariableEvaluator DynamicPressure()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIFAR:GetDynamicPressure", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return vessel.dynamicPressurekPa; };
-            }
-            else
-            {
-                return (string variable) => { return accessor(); };
-            }
-        }
-
-        private VariableEvaluator LandingError()
-        {
-            Func<double> accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetLandingError", typeof(Func<double>));
-
-            return (string variable) => { return accessor(); };
-        }
-
-        private VariableEvaluator LandingAltitude()
-        {
-            Func<double> accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetLandingAltitude", typeof(Func<double>));
-
-            return (string variable) => { return accessor(); };
-        }
-
-        private VariableEvaluator LandingLatitude()
-        {
-            Func<double> accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetLandingLatitude", typeof(Func<double>));
-
-            return (string variable) => { return accessor(); };
-        }
-
-        private VariableEvaluator LandingLongitude()
-        {
-            Func<double> accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetLandingLongitude", typeof(Func<double>));
-
-            return (string variable) => { return accessor(); };
-        }
-
-        private VariableEvaluator LiftAccel()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIFAR:GetLiftForce", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return FallbackEvaluateLiftForce() / totalShipWetMass; };
-            }
-            else
-            {
-                return (string variable) => { return accessor() / totalShipWetMass; };
-            }
-        }
-
-        private VariableEvaluator LiftForce()
-        {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIFAR:GetLiftForce", typeof(Func<double>));
-            if (accessor != null)
-            {
-                double value = accessor();
-                if (double.IsNaN(value))
-                {
-                    accessor = null;
-                }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return FallbackEvaluateLiftForce(); };
-            }
-            else
-            {
-                return (string variable) => { return accessor(); };
-            }
-        }
-
-        private VariableEvaluator MechJebAvailable()
-        {
-            Func<bool> accessor = null;
-
-            accessor = (Func<bool>)GetInternalMethod("JSIMechJeb:GetMechJebAvailable", typeof(Func<bool>));
-            if (accessor == null)
-            {
-                return (string variable) => { return false; };
-            }
-            else
-            {
-                return (string variable) => { return accessor().GetHashCode(); };
-            }
-        }
-
-        private float EvaluateSideSlip()
-        {
-            if (evaluateSideSlip == null)
-            {
-                Func<double> accessor = null;
-
-                accessor = (Func<double>)GetInternalMethod("JSIFAR:GetSideSlip", typeof(Func<double>));
-                if (accessor != null)
-                {
-                    double value = accessor();
-                    if (double.IsNaN(value))
+                    RasterPropMonitorComputer rpmc = RasterPropMonitorComputer.Instantiate(vessel.parts[partIdx], false);
+                    if (rpmc.HasPersistentVariable(name, false))
                     {
-                        accessor = null;
+                        return true;
                     }
                 }
-
-                if (accessor == null)
-                {
-                    evaluateSideSlip = FallbackEvaluateSideSlip;
-                }
-                else
-                {
-                    evaluateSideSlip = accessor;
-                }
             }
 
-            return (float)evaluateSideSlip();
+            return false;
         }
 
-        private VariableEvaluator SideSlip()
+        /// <summary>
+        /// Iterate over all RPMC objects in the craft and set the specified
+        /// persistent var to the same value.
+        /// </summary>
+        /// <param name="name"></param>
+        /// <param name="value"></param>
+        internal void SetPersistentVariable(string name, object value)
         {
-            Func<double> accessor = null;
-
-            accessor = (Func<double>)GetInternalMethod("JSIFAR:GetSideSlip", typeof(Func<double>));
-            if (accessor != null)
+            if (vessel != null)
             {
-                double value = accessor();
-                if (double.IsNaN(value))
+                for (int partIdx = 0; partIdx < vessel.parts.Count; ++partIdx)
                 {
-                    accessor = null;
+                    RasterPropMonitorComputer rpmc = RasterPropMonitorComputer.Instantiate(vessel.parts[partIdx], false);
+                    rpmc.SetPersistentVariable(name, value, false);
                 }
-            }
-
-            if (accessor == null)
-            {
-                return (string variable) => { return FallbackEvaluateSideSlip(); };
-            }
-            else
-            {
-                return (string variable) => { return accessor(); };
             }
         }
-
-        private double TerminalVelocity()
-        {
-            if (evaluateTerminalVelocity == null)
-            {
-                Func<double> accessor = null;
-
-                accessor = (Func<double>)GetInternalMethod("JSIFAR:GetTerminalVelocity", typeof(Func<double>));
-                if (accessor != null)
-                {
-                    double value = accessor();
-                    if (value < 0.0)
-                    {
-                        accessor = null;
-                    }
-                }
-
-                if (accessor == null)
-                {
-                    accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetTerminalVelocity", typeof(Func<double>));
-                    double value = accessor();
-                    if (double.IsNaN(value))
-                    {
-                        accessor = null;
-                    }
-                }
-
-                if (accessor == null)
-                {
-                    accessor = FallbackEvaluateTerminalVelocity;
-                }
-
-                evaluateTerminalVelocity = accessor;
-            }
-
-            return evaluateTerminalVelocity();
-        }
-
-        private double TimeToImpact()
-        {
-            if (evaluateTimeToImpact == null)
-            {
-                Func<double> accessor = null;
-
-                if (accessor == null)
-                {
-                    accessor = (Func<double>)GetInternalMethod("JSIMechJeb:GetLandingTime", typeof(Func<double>));
-                    double value = accessor();
-                    if (double.IsNaN(value))
-                    {
-                        accessor = null;
-                    }
-                }
-
-                if (accessor == null)
-                {
-                    accessor = FallbackEvaluateTimeToImpact;
-                }
-
-                evaluateTimeToImpact = accessor;
-            }
-
-            double timeToImpact = evaluateTimeToImpact();
-            if (double.IsNaN(timeToImpact) || timeToImpact > 365.0 * 24.0 * 60.0 * 60.0 || timeToImpact < 0.0)
-            {
-                timeToImpact = -1.0;
-            }
-            return timeToImpact;
-        }
-        #endregion
-
+        
         //--- Fallback evaluators
         #region FallbackEvaluators
-        private double FallbackEvaluateAngleOfAttack()
+        internal double FallbackEvaluateAngleOfAttack()
         {
             // Code courtesy FAR.
             Transform refTransform = vessel.GetTransform();
@@ -448,7 +112,7 @@ namespace JSI
             return (double)AoA;
         }
 
-        private double FallbackEvaluateDragForce()
+        internal double FallbackEvaluateDragForce()
         {
             // Equations based on https://github.com/NathanKell/AeroGUI/blob/master/AeroGUI/AeroGUI.cs and MechJeb.
             double dragForce = 0.0;
@@ -494,7 +158,7 @@ namespace JSI
             return dragForce;
         }
 
-        private double FallbackEvaluateSideSlip()
+        internal double FallbackEvaluateSideSlip()
         {
             // Code courtesy FAR.
             Transform refTransform = vessel.GetTransform();
@@ -511,7 +175,7 @@ namespace JSI
             return (double)sideslipAngle;
         }
 
-        private double FallbackEvaluateLiftForce()
+        internal double FallbackEvaluateLiftForce()
         {
             double liftForce = 0.0;
 
@@ -555,7 +219,7 @@ namespace JSI
             return liftForce;
         }
 
-        private double FallbackEvaluateTerminalVelocity()
+        internal double FallbackEvaluateTerminalVelocity()
         {
             // Terminal velocity computation based on MechJeb 2.5.1 or one of the later snapshots
             if (altitudeASL > vessel.mainBody.RealMaxAtmosphereAltitude())
@@ -612,7 +276,7 @@ namespace JSI
         /// since precise is also computationally expensive.
         /// </summary>
         /// <returns></returns>
-        private double FallbackEvaluateTimeToImpact()
+        internal double FallbackEvaluateTimeToImpact()
         {
             double secondsToImpact;
             if (vessel.situation == Vessel.Situations.SUB_ORBITAL || vessel.situation == Vessel.Situations.FLYING)

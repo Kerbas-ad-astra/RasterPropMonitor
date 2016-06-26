@@ -19,10 +19,11 @@
  * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
  ****************************************************************************/
 using System;
-using System.Reflection;
-using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Text;
+using UnityEngine;
 
 namespace JSI
 {
@@ -33,18 +34,14 @@ namespace JSI
         public readonly string name = string.Empty;
         public readonly bool unlocker;
         private readonly string text;
+        private StringProcessorFormatter[] spf;
+        private string processedText = string.Empty;
 
         public string Text
         {
             get
             {
-                // If there's a handler references method, it gets called before each text call.
-                if (pageHandlerS.getHandlerReferences != null)
-                {
-                    pageHandlerS.getHandlerReferences(pageHandlerModule, backgroundHandlerModule);
-                }
-
-                return pageHandlerMethod != null ? pageHandlerMethod(screenWidth, screenHeight) : string.IsNullOrEmpty(text) ? string.Empty : text;
+                return processedText;
             }
         }
 
@@ -109,6 +106,56 @@ namespace JSI
             public Action<int> buttonClick;
             public Action<int> buttonRelease;
             public Action<MonoBehaviour, MonoBehaviour> getHandlerReferences;
+        }
+
+        public void UpdateText(RasterPropMonitorComputer rpmComp)
+        {
+            // If there's a handler references method, it gets called before each text call.
+            if (pageHandlerS.getHandlerReferences != null)
+            {
+                pageHandlerS.getHandlerReferences(pageHandlerModule, backgroundHandlerModule);
+            }
+
+            if (pageHandlerMethod != null)
+            {
+                processedText = pageHandlerMethod(screenWidth, screenHeight);
+
+                if (processedText.IndexOf("$&$", StringComparison.Ordinal) != -1)
+                {
+                    // There are processed variables in here?
+                    StringBuilder bf = new StringBuilder();
+                    string[] linesArray = processedText.Split(JUtil.LineSeparator, StringSplitOptions.None);
+                    for (int i = 0; i < linesArray.Length; i++)
+                    {
+                        bf.AppendLine(StringProcessor.ProcessString(linesArray[i], rpmComp));
+                    }
+                    processedText = bf.ToString();
+                }
+            }
+            else
+            {
+                if (isMutable)
+                {
+                    if(spf == null)
+                    {
+                        string[] linesArray = text.Split(JUtil.LineSeparator, StringSplitOptions.None);
+                        spf = new StringProcessorFormatter[linesArray.Length];
+                        for(int i=0; i<linesArray.Length; ++i)
+                        {
+                            spf[i] = new StringProcessorFormatter(linesArray[i], rpmComp);
+                        }
+                    }
+
+                    StringBuilder bf = new StringBuilder();
+                    for (int i = 0; i < spf.Length; i++)
+                    {
+                        bf.AppendLine(StringProcessor.ProcessString(spf[i], rpmComp));
+                    }
+
+                    processedText = bf.ToString();
+                }
+            }
+
         }
 
         public bool SwitchingPermitted(string destination)
@@ -296,6 +343,14 @@ namespace JSI
                 {
                     text = JUtil.LoadPageDefinition(node.GetValue("text"));
                     isMutable |= text.IndexOf("$&$", StringComparison.Ordinal) != -1;
+                    if (!isMutable)
+                    {
+                        processedText = text;
+                    }
+                }
+                else
+                {
+                    text = string.Empty;
                 }
             }
 
@@ -688,7 +743,7 @@ namespace JSI
                     break;
                 case BackgroundType.Camera:
                     GL.Clear(true, true, ourMonitor.emptyColorValue);
-                    if (!cameraObject.Render())
+                    if (!cameraObject.Render(screen, 0.0f, 0.0f))
                     {
                         if (ourMonitor.noSignalTexture != null)
                         {

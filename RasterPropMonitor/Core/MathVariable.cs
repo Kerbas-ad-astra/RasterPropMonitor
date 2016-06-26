@@ -36,6 +36,9 @@ namespace JSI
             DIVIDE,
             MAX,
             MIN,
+            POWER,
+            ANGLEDELTA,
+            ATAN2,
             MAXINDEX,
             MININDEX,
         };
@@ -45,21 +48,11 @@ namespace JSI
         private readonly Operator op;
         private readonly bool indexOperator;
 
-        internal MathVariable(ConfigNode node)
+        internal MathVariable(ConfigNode node, RasterPropMonitorComputer rpmComp)
         {
             name = node.GetValue("name");
 
-            string[] sources = node.GetValues("sourceVariable");
-            for (int i = 0; i < sources.Length; ++i)
-            {
-                VariableOrNumber sv = VariableOrNumber.Instantiate(sources[i]);
-                sourceVariables.Add(sv);
-            }
-
-            if (sourceVariables.Count == 0)
-            {
-                throw new ArgumentException("Did not find any SOURCE_VARIABLE nodes in RPM_CUSTOM_VARIABLE", name);
-            }
+            int maxParameters = int.MaxValue;
 
             string oper = node.GetValue("operator");
             if (oper == Operator.NONE.ToString())
@@ -97,6 +90,23 @@ namespace JSI
                 op = Operator.MIN;
                 indexOperator = false;
             }
+            else if (oper == Operator.POWER.ToString())
+            {
+                op = Operator.POWER;
+                indexOperator = false;
+            }
+            else if (oper == Operator.ANGLEDELTA.ToString())
+            {
+                op = Operator.ANGLEDELTA;
+                indexOperator = false;
+                maxParameters = 2;
+            }
+            else if (oper == Operator.ATAN2.ToString())
+            {
+                op = Operator.ATAN2;
+                indexOperator = false;
+                maxParameters = 2;
+            }
             else if (oper == Operator.MAXINDEX.ToString())
             {
                 op = Operator.MAXINDEX;
@@ -111,26 +121,31 @@ namespace JSI
             {
                 throw new ArgumentException("Found an invalid operator type in RPM_CUSTOM_VARIABLE", oper);
             }
+
+            string[] sources = node.GetValues("sourceVariable");
+            int numIndices = Math.Min(sources.Length, maxParameters);
+            for (int i = 0; i < numIndices; ++i)
+            {
+                VariableOrNumber sv = rpmComp.InstantiateVariableOrNumber(sources[i]);
+                sourceVariables.Add(sv);
+            }
+
+            if (sourceVariables.Count == 0)
+            {
+                throw new ArgumentException("Did not find any SOURCE_VARIABLE nodes in RPM_CUSTOM_VARIABLE", name);
+            }
         }
 
-        public object Evaluate(RPMVesselComputer comp)
+        public object Evaluate()
         {
             if (indexOperator)
             {
                 int index = 0;
-                float value = 0.0f;
-                if (!sourceVariables[0].Get(out value, comp))
-                {
-                    return 0;
-                }
+                float value = sourceVariables[0].AsFloat();
 
                 for (int i = 1; i < sourceVariables.Count; ++i)
                 {
-                    float operand;
-                    if (!sourceVariables[i].Get(out operand, comp))
-                    {
-                        return 0;
-                    }
+                    float operand = sourceVariables[i].AsFloat();
 
                     switch (op)
                     {
@@ -155,19 +170,11 @@ namespace JSI
             }
             else
             {
-                float value = 0.0f;
-                if (!sourceVariables[0].Get(out value, comp))
-                {
-                    return 0.0f;
-                }
+                double value = sourceVariables[0].AsDouble();
 
                 for (int i = 1; i < sourceVariables.Count; ++i)
                 {
-                    float operand;
-                    if (!sourceVariables[i].Get(out operand, comp))
-                    {
-                        return 0.0f;
-                    }
+                    double operand = sourceVariables[i].AsDouble();
 
                     switch (op)
                     {
@@ -186,10 +193,19 @@ namespace JSI
                             value /= operand;
                             break;
                         case Operator.MAX:
-                            value = Mathf.Max(value, operand);
+                            value = Math.Max(value, operand);
                             break;
                         case Operator.MIN:
-                            value = Mathf.Min(value, operand);
+                            value = Math.Min(value, operand);
+                            break;
+                        case Operator.POWER:
+                            value = Math.Pow(value, operand);
+                            break;
+                        case Operator.ANGLEDELTA:
+                            value = Mathf.DeltaAngle((float)value, (float)operand);
+                            break;
+                        case Operator.ATAN2:
+                            value = Math.Atan2(value, operand) * Mathf.Rad2Deg;
                             break;
                     }
                 }

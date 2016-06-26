@@ -31,6 +31,9 @@ namespace JSI
         public string perPodPersistenceName = string.Empty;
 
         [KSPField]
+        public bool perPodPersistenceIsGlobal = false;
+
+        [KSPField]
         public string defaultValue = string.Empty;
 
         [KSPField]
@@ -45,8 +48,9 @@ namespace JSI
         [KSPField]
         public bool loopInput = false;
 
-        private RasterPropMonitorComputer rpmComp;
         private List<NumericInput> numericInputs = new List<NumericInput>();
+
+        private RasterPropMonitorComputer rpmComp;
 
         private VariableOrNumber minRange;
         private VariableOrNumber maxRange;
@@ -62,6 +66,8 @@ namespace JSI
 
             try
             {
+                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
+
                 if (string.IsNullOrEmpty(perPodPersistenceName))
                 {
                     JUtil.LogErrorMessage(this, "perPodPersistenceName must be defined");
@@ -82,12 +88,12 @@ namespace JSI
 
                 if (!string.IsNullOrEmpty(minValue))
                 {
-                    minRange = VariableOrNumber.Instantiate(minValue);
+                    minRange = rpmComp.InstantiateVariableOrNumber(minValue);
                     //JUtil.LogMessage(this, "Created lower bound variable");
                 }
                 if (!string.IsNullOrEmpty(maxValue))
                 {
-                    maxRange = VariableOrNumber.Instantiate(maxValue);
+                    maxRange = rpmComp.InstantiateVariableOrNumber(maxValue);
                     //JUtil.LogMessage(this, "Created upper bound variable");
                 }
                 if ((minRange == null || maxRange == null) && loopInput == true)
@@ -96,24 +102,19 @@ namespace JSI
                     loopInput = false;
                 }
 
-                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp);
-                if (!rpmComp.HasVar(perPodPersistenceName))
+                if (!rpmComp.HasPersistentVariable(perPodPersistenceName, perPodPersistenceIsGlobal))
                 {
                     //JUtil.LogMessage(this, "Initializing per pod persistence value {0}", perPodPersistenceName);
 
-                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                    VariableOrNumber von = VariableOrNumber.Instantiate(defaultValue);
-                    float value;
-                    if (von.Get(out value, comp))
+                    VariableOrNumber von = rpmComp.InstantiateVariableOrNumber(defaultValue);
+                    float value = von.AsFloat();
+
+                    if (stepSize > 0.0f)
                     {
-                        //JUtil.LogMessage(this, " ... Initialized to {0}", (int)value);
-                        rpmComp.SetVar(perPodPersistenceName, (int)value);
+                        float remainder = value % stepSize;
+                        value -= remainder;
                     }
-                    else
-                    {
-                        JUtil.LogErrorMessage(this, "Failed to evaluate default value of {0} for {1}", defaultValue, perPodPersistenceName);
-                        return;
-                    }
+                    rpmComp.SetPersistentVariable(perPodPersistenceName, value, perPodPersistenceIsGlobal);
                 }
 
                 ConfigNode moduleConfig = null;
@@ -155,7 +156,6 @@ namespace JSI
         public void OnDestroy()
         {
             //JUtil.LogMessage(this, "OnDestroy()");
-            rpmComp = null;
             numericInputs = null;
         }
 
@@ -173,54 +173,41 @@ namespace JSI
 
                 if (change < 0.0f || change > 0.0f)
                 {
-                    RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-
-                    // MOARdV TODO: persistent floats
-                    float val = (float)rpmComp.GetVar(perPodPersistenceName);
+                    float val = rpmComp.GetPersistentVariable(perPodPersistenceName, 0.0f, perPodPersistenceIsGlobal).MassageToFloat();
                     val += change + remainder;
 
                     if (minRange != null)
                     {
-                        float v;
-                        if (minRange.Get(out v, comp))
+                        float v = minRange.AsFloat();
+
+                        if (loopInput)
                         {
-                            if (loopInput)
+                            if (val < v)
                             {
-                                if (val < v)
-                                {
-                                    if (maxRange.Get(out v, comp))
-                                    {
-                                        val = v;
-                                    }
-                                }
+                                val = maxRange.AsFloat();
                             }
-                            else
-                            {
-                                val = Mathf.Max(val, v);
-                            }
+                        }
+                        else
+                        {
+                            val = Mathf.Max(val, v);
                         }
                     }
 
                     if (maxRange != null)
                     {
-                        float v;
-                        if (maxRange.Get(out v, comp))
+                        float v = maxRange.AsFloat();
+                        if (loopInput)
                         {
-                            if (loopInput)
+                            if (val > v)
                             {
-                                if (val > v)
-                                {
-                                    if (minRange.Get(out v, comp))
-                                    {
-                                        val = v;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                val = Mathf.Min(val, v);
+                                val = minRange.AsFloat();
                             }
                         }
+                        else
+                        {
+                            val = Mathf.Min(val, v);
+                        }
+
                     }
 
                     if (stepSize > 0.0f)
@@ -231,7 +218,11 @@ namespace JSI
                         val -= remainder;
                     }
 
-                    rpmComp.SetVar(perPodPersistenceName, (int)val);
+                    rpmComp.SetPersistentVariable(perPodPersistenceName, val, perPodPersistenceIsGlobal);
+                }
+                else
+                {
+                    remainder = 0.0f;
                 }
             }
             else

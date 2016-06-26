@@ -18,9 +18,12 @@
  * You should have received a copy of the GNU General Public License
  * along with RasterPropMonitor.  If not, see <http://www.gnu.org/licenses/>.
  ****************************************************************************/
+using KSP.UI;
+using KSP.UI.Screens;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 
 namespace JSI
 {
@@ -30,12 +33,22 @@ namespace JSI
     /// </summary>
     public class JSIInternalRPMButtons : IJSIModule
     {
+        public JSIInternalRPMButtons(Vessel myVessel)
+        {
+            vessel = myVessel;
+        }
+
         /// <summary>
         /// Turns on the flowState for all resources on the ship.
         /// </summary>
         /// <param name="state"></param>
         public void ButtonActivateReserves(bool state)
         {
+            if (vessel == null)
+            {
+                return;
+            }
+
             foreach (Part thatPart in vessel.parts)
             {
                 foreach (PartResource resource in thatPart.Resources)
@@ -54,18 +67,8 @@ namespace JSI
         {
             if (vessel != null)
             {
-                foreach (Part thatPart in vessel.parts)
-                {
-                    foreach (PartResource resource in thatPart.Resources)
-                    {
-                        if (!resource.flowState)
-                        {
-                            // Early return: At least one resource is flagged as a
-                            // reserve.
-                            return true;
-                        }
-                    }
-                }
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return comp.resourcesLocked;
             }
             return false;
         }
@@ -77,13 +80,9 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonClearNodes(bool state)
         {
-            // patchedConicSolver can be null in early career mode.
-            if (vessel.patchedConicSolver != null)
+            if (vessel != null)
             {
-                while (vessel.patchedConicSolver.maneuverNodes.Count > 0)
-                {
-                    vessel.patchedConicSolver.RemoveManeuverNode(vessel.patchedConicSolver.maneuverNodes.Last());
-                }
+                JUtil.RemoveAllNodes(vessel.patchedConicSolver);
             }
         }
 
@@ -93,12 +92,7 @@ namespace JSI
         /// <returns></returns>
         public bool ButtonClearNodesState()
         {
-            if (vessel == null)
-            {
-                return false;
-            }
-
-            if (vessel.patchedConicSolver == null)
+            if (vessel == null || vessel.patchedConicSolver == null)
             {
                 // patchedConicSolver can be null in early career mode.
                 return false;
@@ -131,41 +125,10 @@ namespace JSI
         /// <param name="state">"true" for on, "false" for off</param>
         public void ButtonEnableEngines(bool state)
         {
-            foreach (Part thatPart in vessel.parts)
+            if (vessel != null)
             {
-                // We accept "state == false" to allow engines that are
-                // activated outside of the current staging to be shut off by
-                // this function.
-                if (thatPart.inverseStage == Staging.CurrentStage || !state)
-                {
-                    foreach (PartModule pm in thatPart.Modules)
-                    {
-                        var engine = pm as ModuleEngines;
-                        if (engine != null && engine.EngineIgnited != state)
-                        {
-                            if (state && engine.allowRestart)
-                            {
-                                engine.Activate();
-                            }
-                            else if (engine.allowShutdown)
-                            {
-                                engine.Shutdown();
-                            }
-                        }
-                        var engineFX = pm as ModuleEnginesFX;
-                        if (engineFX != null && engineFX.EngineIgnited != state)
-                        {
-                            if (state && engineFX.allowRestart)
-                            {
-                                engineFX.Activate();
-                            }
-                            else if (engineFX.allowShutdown)
-                            {
-                                engineFX.Shutdown();
-                            }
-                        }
-                    }
-                }
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                comp.SetEnableEngines(state);
             }
         }
 
@@ -177,24 +140,8 @@ namespace JSI
         {
             if (vessel != null)
             {
-                foreach (Part thatPart in vessel.parts)
-                {
-                    foreach (PartModule pm in thatPart.Modules)
-                    {
-                        var engine = pm as ModuleEngines;
-                        if (engine != null && engine.allowShutdown && engine.getIgnitionState)
-                        {
-                            // early out: at least one engine is enabled.
-                            return true;
-                        }
-                        var engineFX = pm as ModuleEnginesFX;
-                        if (engineFX != null && engineFX.allowShutdown && engineFX.getIgnitionState)
-                        {
-                            // early out: at least one engine is enabled.
-                            return true;
-                        }
-                    }
-                }
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return comp.anyEnginesEnabled;
             }
             return false;
         }
@@ -207,33 +154,8 @@ namespace JSI
         {
             if (vessel != null)
             {
-                foreach (PartModule pm in ElectricGenerators(vessel))
-                {
-                    if (pm is ModuleGenerator)
-                    {
-                        ModuleGenerator gen = pm as ModuleGenerator;
-                        if (state)
-                        {
-                            gen.Activate();
-                        }
-                        else
-                        {
-                            gen.Shutdown();
-                        }
-                    }
-                    else if (pm is ModuleResourceConverter)
-                    {
-                        ModuleResourceConverter gen = pm as ModuleResourceConverter;
-                        if (state)
-                        {
-                            gen.StartResourceConverter();
-                        }
-                        else
-                        {
-                            gen.StopResourceConverter();
-                        }
-                    }
-                }
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                comp.SetEnableGenerators(state);
             }
         }
 
@@ -245,17 +167,8 @@ namespace JSI
         {
             if (vessel != null)
             {
-                foreach (PartModule pm in ElectricGenerators(vessel))
-                {
-                    if (pm is ModuleGenerator && (pm as ModuleGenerator).generatorIsActive == true)
-                    {
-                        return true;
-                    }
-                    else if (pm is ModuleResourceConverter && (pm as ModuleResourceConverter).IsActivated == true)
-                    {
-                        return true;
-                    }
-                }
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return comp.generatorsActive;
             }
 
             return false;
@@ -272,9 +185,16 @@ namespace JSI
                 FlightInputHandler.fetch.precisionMode = state;
 
                 // Update the UI.
-                foreach (UnityEngine.Renderer renderer in FlightInputHandler.fetch.inputGaugeRenderers)
+                // MOARdV: In 1.1, this only affects the normal flight display,
+                // not the docking mode display.
+                var gauges = UnityEngine.Object.FindObjectOfType<KSP.UI.Screens.Flight.LinearControlGauges>();
+                if (gauges != null)
                 {
-                    renderer.material.color = (state) ? XKCDColors.BrightCyan : XKCDColors.Orange;
+                    //JUtil.LogMessage(this, "{0} input gauge images", gauges.inputGaugeImages.Count);
+                    for (int i = 0; i < gauges.inputGaugeImages.Count; ++i)
+                    {
+                        gauges.inputGaugeImages[i].color = (state) ? XKCDColors.BrightCyan : XKCDColors.Orange;
+                    }
                 }
             }
         }
@@ -297,9 +217,9 @@ namespace JSI
         private void ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode newMode)
         {
             // find the UI object on screen
-            RUIToggleButton[] SASbtns = UnityEngine.Object.FindObjectOfType<VesselAutopilotUI>().modeButtons;
+            UIStateToggleButton[] SASbtns = UnityEngine.Object.FindObjectOfType<VesselAutopilotUI>().modeButtons;
             // set our mode, note it takes the mode as an int, generally top to bottom, left to right, as seen on the screen. Maneuver node being the exception, it is 9
-            SASbtns.ElementAt<RUIToggleButton>((int)newMode).SetTrue(true, true);
+            SASbtns.ElementAt<UIStateToggleButton>((int)newMode).SetState(true);
         }
 
         /// <summary>
@@ -309,7 +229,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeStabilityAssist(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.StabilityAssist))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.StabilityAssist))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.StabilityAssist);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.StabilityAssist);
@@ -332,7 +252,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModePrograde(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Prograde))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Prograde))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Prograde);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.Prograde);
@@ -355,7 +275,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeRetrograde(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Retrograde))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Retrograde))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Retrograde);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.Retrograde);
@@ -378,7 +298,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeNormal(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Normal))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Normal))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Normal);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.Normal);
@@ -401,7 +321,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeAntiNormal(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Antinormal))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Antinormal))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Antinormal);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.Antinormal);
@@ -424,7 +344,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeRadialIn(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.RadialIn))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.RadialIn))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.RadialIn);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.RadialIn);
@@ -447,7 +367,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeRadialOut(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.RadialOut))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.RadialOut))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.RadialOut);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.RadialOut);
@@ -470,7 +390,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeTarget(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Target))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Target))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Target);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.Target);
@@ -493,7 +413,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeAntiTarget(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.AntiTarget))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.AntiTarget))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.AntiTarget);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.AntiTarget);
@@ -516,7 +436,7 @@ namespace JSI
         // Analysis disable once UnusedParameter
         public void ButtonSASModeManeuver(bool ignored)
         {
-            if (vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Maneuver))
+            if (vessel != null && vessel.Autopilot.CanSetMode(VesselAutopilot.AutopilotMode.Maneuver))
             {
                 vessel.Autopilot.SetMode(VesselAutopilot.AutopilotMode.Maneuver);
                 ForceUpdateSASModeToggleButtons(VesselAutopilot.AutopilotMode.Maneuver);
@@ -537,7 +457,7 @@ namespace JSI
          */
         public void ButtonSpeedMode(bool ignored)
         {
-            FlightUIController.fetch.cycleSpdModes();
+            FlightGlobals.CycleSpeedModes();
         }
 
         /**
@@ -581,7 +501,7 @@ namespace JSI
         /// <param name="state"></param>
         public void ButtonCutThrottle(bool state)
         {
-            if (state)
+            if (state && vessel != null)
             {
                 float throttle = vessel.ctrlState.mainThrottle;
                 try
@@ -610,12 +530,35 @@ namespace JSI
         /// <param name="state"></param>
         public void ButtonFullThrottle(bool state)
         {
-            if (state)
+            if (state && vessel != null)
             {
                 float throttle = vessel.ctrlState.mainThrottle;
                 try
                 {
                     FlightInputHandler.state.mainThrottle = 1.0f;
+                }
+                catch (Exception)
+                {
+                    FlightInputHandler.state.mainThrottle = throttle;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Set the throttle to the desired setting in the range [0-100]
+        /// </summary>
+        /// <param name="setting"></param>
+        public void SetThrottle(double setting)
+        {
+            if (vessel != null)
+            {
+                float newThrottle = Mathf.Clamp01((float)setting / 100.0f);
+                float throttle = vessel.ctrlState.mainThrottle;
+
+                try
+                {
+                    // Why was this in a try with a catch that does the same thing?
+                    FlightInputHandler.state.mainThrottle = newThrottle;
                 }
                 catch (Exception)
                 {
@@ -631,6 +574,28 @@ namespace JSI
         public bool ButtonFullThrottleState()
         {
             return ((vessel != null) && vessel.ctrlState.mainThrottle > 0.99f);
+        }
+
+        /// <summary>
+        /// Recover the vessel.  Only recovers when the vessel is recoverable,
+        /// regardless of the parameter.
+        /// </summary>
+        /// <param name="ignored">Ignored</param>
+        public void RecoverVessel(bool ignored)
+        {
+            if (vessel != null && vessel.IsRecoverable)
+            {
+                GameEvents.OnVesselRecoveryRequested.Fire(vessel);
+            }
+        }
+
+        /// <summary>
+        /// Returns true when the "Recover Vessel" feature is true.
+        /// </summary>
+        /// <returns></returns>
+        public bool CanRecoverVessel()
+        {
+            return (vessel != null) ? vessel.IsRecoverable : false;
         }
 
         /// <summary>
@@ -655,13 +620,10 @@ namespace JSI
                 return;
             }
 
-            ModuleDockingNode node = InferDockingNode(vessel);
-            if (node != null)
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            if (comp.mainDockingNodeState == RPMVesselComputer.DockingNodeState.DOCKED)
             {
-                if ((node.state == "Docked (docker)") || (node.state == "Docked (dockee)"))
-                {
-                    node.Undock();
-                }
+                comp.mainDockingNode.Undock();
             }
         }
 
@@ -676,13 +638,10 @@ namespace JSI
                 return;
             }
 
-            ModuleDockingNode node = InferDockingNode(vessel);
-            if (node != null)
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            if (comp.mainDockingNodeState == RPMVesselComputer.DockingNodeState.PREATTACHED)
             {
-                if (node.state == "PreAttached")
-                {
-                    node.Decouple();
-                }
+                comp.mainDockingNode.Decouple();
             }
         }
 
@@ -697,16 +656,8 @@ namespace JSI
                 return false;
             }
 
-            ModuleDockingNode node = InferDockingNode(vessel);
-            if (node != null)
-            {
-                // Urk.  No enums or numerics to test state...
-                return (node.state == "PreAttached");
-            }
-            else
-            {
-                return false;
-            }
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return (comp.mainDockingNodeState == RPMVesselComputer.DockingNodeState.PREATTACHED);
         }
 
         /// <summary>
@@ -720,16 +671,8 @@ namespace JSI
                 return false;
             }
 
-            ModuleDockingNode node = InferDockingNode(vessel);
-            if (node != null)
-            {
-                // Urk.  No enums or numerics to test state...
-                return (node.state == "Docked (docker)") || (node.state == "Docked (dockee)");
-            }
-            else
-            {
-                return false;
-            }
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return (comp.mainDockingNodeState == RPMVesselComputer.DockingNodeState.DOCKED);
         }
 
         /// <summary>
@@ -743,16 +686,164 @@ namespace JSI
                 return false;
             }
 
-            ModuleDockingNode node = InferDockingNode(vessel);
-            if (node != null)
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return (comp.mainDockingNodeState == RPMVesselComputer.DockingNodeState.READY);
+        }
+
+        /// <summary>
+        /// Returns a value representing the current state of the landing gear.
+        /// </summary>
+        /// <returns></returns>
+        public double LandingGearState()
+        {
+            if (vessel == null)
             {
-                // Urk.  No enums or numerics to test state...
-                return (node.state == "Ready");
+                return -1.0;
             }
-            else
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return (double)comp.gearState;
+        }
+
+        /// <summary>
+        /// Returns a value representing the current position of landing gear
+        /// where 0 is retracted, 1 is extended.
+        /// </summary>
+        /// <returns></returns>
+        public double LandingGearPosition()
+        {
+            if (vessel == null)
+            {
+                return 0.0;
+            }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return (double)comp.gearPosition;
+        }
+
+        /// <summary>
+        /// Toggles thrust reversers
+        /// </summary>
+        /// <param name="state"></param>
+        public void SetThrustReverser(bool state)
+        {
+            if (vessel != null)
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                for (int i = 0; i < comp.availableThrustReverser.Count; ++i)
+                {
+                    ModuleAnimateGeneric thrustReverser = comp.availableThrustReverser[i].thrustReverser;
+                    if (thrustReverser != null)
+                    {
+                        if (state)
+                        {
+                            if (thrustReverser.Progress < 0.5f && thrustReverser.CanMove && thrustReverser.aniState != ModuleAnimateGeneric.animationStates.MOVING)
+                            {
+                                thrustReverser.Toggle();
+                            }
+                        }
+                        else
+                        {
+                            if (thrustReverser.Progress > 0.5f && thrustReverser.CanMove && thrustReverser.aniState != ModuleAnimateGeneric.animationStates.MOVING)
+                            {
+                                thrustReverser.Toggle();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns true if at least one thrust reverser is enabled.
+        /// </summary>
+        /// <returns></returns>
+        public bool GetThrustReverserEnabled()
+        {
+            if (vessel == null)
             {
                 return false;
             }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return comp.anyThrustReversersDeployed;
+        }
+
+        /// <summary>
+        /// Returns the wheel brakes tweakable (averaged across wheels)
+        /// </summary>
+        /// <returns></returns>
+        public double GetWheelBrakes()
+        {
+            if (vessel == null)
+            {
+                return 0.0;
+            }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return (double)comp.wheelBrakeSetting;
+        }
+
+        /// <summary>
+        /// Adjust the wheel brake tweakable
+        /// </summary>
+        /// <param name="setting"></param>
+        public void SetWheelBrakes(double setting)
+        {
+            if (vessel != null)
+            {
+                float newsetting = Mathf.Clamp((float)setting, 0.0f, 200.0f);
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                for (int i = 0; i < comp.availableWheelBrakes.Count; ++i)
+                {
+                    comp.availableWheelBrakes[i].brakeTweakable = newsetting;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns true if any wheels are damaged
+        /// </summary>
+        /// <returns></returns>
+        public bool GetWheelsDamaged()
+        {
+            if (vessel == null)
+            {
+                return false;
+            }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return comp.wheelsDamaged;
+        }
+
+        /// <summary>
+        /// Returns true if any wheels are repairable
+        /// </summary>
+        /// <returns></returns>
+        public bool GetWheelsRepairable()
+        {
+            if (vessel == null)
+            {
+                return false;
+            }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return comp.wheelsRepairable;
+        }
+
+        /// <summary>
+        /// Returns the stress of the most-stressed wheel.
+        /// </summary>
+        /// <returns></returns>
+        public double GetWheelStress()
+        {
+            if (vessel == null)
+            {
+                return 0.0;
+            }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return comp.wheelStress;
         }
 
         /// <summary>
@@ -761,9 +852,15 @@ namespace JSI
         /// <param name="state"></param>
         public void GimbalLock(bool state)
         {
-            foreach (ModuleGimbal gimbal in FindActiveStageGimbals(vessel))
+            if (vessel == null)
             {
-                gimbal.gimbalLock = state;
+                return;
+            }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            for (int i = 0; i < comp.availableGimbals.Count; ++i)
+            {
+                comp.availableGimbals[i].gimbalLock = state;
             }
         }
 
@@ -773,67 +870,211 @@ namespace JSI
         /// <returns></returns>
         public bool GimbalLockState()
         {
-            bool gimbalLockState = false;
-
             if (vessel == null)
             {
-                return gimbalLockState; // early
+                return false; // early
             }
 
-            foreach (ModuleGimbal gimbal in FindActiveStageGimbals(vessel))
-            {
-                if (gimbal.gimbalLock)
-                {
-                    gimbalLockState = true;
-                    break;
-                }
-            }
-
-            return gimbalLockState;
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return comp.gimbalsLocked;
         }
 
+        /// <summary>
+        /// Toggle the state of any radar units installed on the craft.
+        /// </summary>
+        /// <param name="enabled"></param>
         public void RadarEnable(bool enabled)
         {
-            try
+            if (vessel == null)
             {
-                List<JSIRadar> radars = vessel.FindPartModulesImplementing<JSIRadar>();
-                for (int i = 0; i < radars.Count; ++i)
-                {
-                    radars[i].radarEnabled = enabled;
-                }
+                return;
             }
-            catch { }
+
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            for (int i = 0; i < comp.availableRadars.Count; ++i)
+            {
+                comp.availableRadars[i].radarEnabled = enabled;
+            }
         }
 
+        /// <summary>
+        /// Returns true if at least one radar is active.
+        /// </summary>
+        /// <returns></returns>
         public bool RadarEnableState()
         {
-            bool enabled = false;
-
-            try
+            if (vessel == null)
             {
-                List<JSIRadar> radars = vessel.FindPartModulesImplementing<JSIRadar>();
-                for(int i=0; i<radars.Count; ++i)
-                {
-                    if(radars[i].radarEnabled)
-                    {
-                        enabled = true;
-                        break;
-                    }
-                }
+                return false;
             }
-            catch { }
 
-            return enabled;
+            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+            return comp.radarActive;
         }
 
+        /// <summary>
+        /// Returns true if at least one solar panel may be deployed.
+        /// </summary>
+        /// <returns></returns>
+        public bool SolarPanelsDeployable()
+        {
+            if (vessel != null)
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return comp.solarPanelsDeployable;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Returns true if at least one solar panel may be retracted.
+        /// </summary>
+        /// <returns></returns>
+        public bool SolarPanelsRetractable()
+        {
+            if (vessel != null)
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return comp.solarPanelsRetractable;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Returns the animation state of the first retractable solar panel
+        /// that is not broken, unless they're all broken.
+        /// </summary>
+        /// <returns></returns>
+        public double SolarPanelsState()
+        {
+            if (vessel != null)
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return (double)comp.solarPanelMovement;
+            }
+            return -1.0;
+        }
+
+        /// <summary>
+        /// Toggles the state of deployable solar panels.
+        /// </summary>
+        /// <param name="state"></param>
+        public void SetDeploySolarPanels(bool state)
+        {
+            if (vessel != null)
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                comp.SetDeploySolarPanels(state);
+            }
+        }
+
+        /// <summary>
+        /// Inverse of SolarPanelsDeployable for use with SetDeploySolarPanels
+        /// </summary>
+        /// <returns></returns>
+        public bool GetDeploySolarPanels()
+        {
+            if (vessel != null)
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return comp.solarPanelsState;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Sets multi-mode engines to run in primary mode (true) or secondary
+        /// mode (false).
+        /// </summary>
+        /// <param name="newstate"></param>
+        public void SetEnginesPrimaryMode(bool newstate)
+        {
+            try
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                for (int i = 0; i < comp.availableMultiModeEngines.Count; ++i)
+                {
+                    if (comp.availableMultiModeEngines[i].runningPrimary ^ newstate)
+                    {
+                        if (newstate)
+                        {
+                            comp.availableMultiModeEngines[i].SetPrimary(true);
+                        }
+                        else
+                        {
+                            comp.availableMultiModeEngines[i].SetSecondary(true);
+                        }
+                        // Revised implementation:
+                        //comp.availableMultiModeEngines[i].ModeEvent();
+
+                        // original implementation:
+                        //var ev = comp.availableMultiModeEngines[i].Events["ModeEvent"];
+                        //if (ev != null)
+                        //{
+                        //    ev.Invoke();
+                        //}
+                    }
+                }
+
+                // Toggling modes changes which engines are enabled and which
+                // are disabled.  Force a reset here.
+                comp.InvalidateModuleLists();
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Returns true if any engines are running in primary mode (for multi-mode
+        /// engines).
+        /// </summary>
+        /// <returns></returns>
+        public bool GetEnginesPrimaryMode()
+        {
+            if (vessel != null)
+            {
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                return comp.anyMmePrimary;
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Sets the throttle imit for all engines.
+        /// </summary>
+        /// <param name="limit"></param>
+        public void SetThrottleLimit(double limit)
+        {
+            if (vessel != null)
+            {
+                if (limit < 0.0)
+                {
+                    limit = 0.0;
+                }
+                else if (limit > 100.0)
+                {
+                    limit = 100.0;
+                }
+
+                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
+                for (int i = 0; i < comp.availableEngines.Count; ++i)
+                {
+                    comp.availableEngines[i].thrustPercentage = (float)limit;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Returns a single numeric value indicating what mode the autopilot is in.
+        /// </summary>
+        /// <returns></returns>
         public double GetSASMode()
         {
-            if(vessel == null)
+            if (vessel == null)
             {
                 return 0.0; // StabilityAssist
             }
             double mode;
-            switch(vessel.Autopilot.Mode)
+            switch (vessel.Autopilot.Mode)
             {
                 case VesselAutopilot.AutopilotMode.StabilityAssist:
                     mode = 0.0;
@@ -876,7 +1117,7 @@ namespace JSI
         {
             int imode = (int)mode;
             VesselAutopilot.AutopilotMode autopilotMode;
-            switch(imode)
+            switch (imode)
             {
                 case 0:
                     autopilotMode = VesselAutopilot.AutopilotMode.StabilityAssist;
@@ -913,126 +1154,82 @@ namespace JSI
                     return;
             }
 
-            if (vessel.Autopilot.CanSetMode(autopilotMode))
+            if (vessel != null && vessel.Autopilot.CanSetMode(autopilotMode))
             {
                 vessel.Autopilot.SetMode(autopilotMode);
                 ForceUpdateSASModeToggleButtons(autopilotMode);
             }
         }
 
-        /// <summary>
-        /// Infers the docking node this vessel controls
-        /// </summary>
-        /// <param name="vessel"></param>
-        /// <returns></returns>
-        private static ModuleDockingNode InferDockingNode(Vessel vessel)
+        /**
+         * @returns true if all trim settings are within 1% of neutral.
+         */
+        public bool TrimNeutralState()
         {
-            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-            Part compPart = comp.ReferencePart;
-            uint launchId;
-            if (compPart == null)
+            if (vessel != null && vessel.ctrlState != null)
             {
-                launchId = 0u;
+                return Mathf.Abs(vessel.ctrlState.pitchTrim) < 0.01f && Mathf.Abs(vessel.ctrlState.rollTrim) < 0.01f && Mathf.Abs(vessel.ctrlState.yawTrim) < 0.01f;
             }
             else
             {
-                launchId = compPart.launchID;
-            }
-
-            Part referencePart = vessel.GetReferenceTransformPart();
-            ModuleDockingNode node = referencePart.FindModuleImplementing<ModuleDockingNode>();
-            if (node != null)
-            {
-                //JUtil.LogMessage(vessel, "InferDockingNode: using reference part {0}", referencePart.name);
-                // The current reference part is a docking node.
-                return node;
-            }
-
-            for (int i = 0; i < vessel.parts.Count; ++i)
-            {
-                if (vessel.parts[i].launchID == launchId)
-                {
-                    node = vessel.parts[i].FindModuleImplementing<ModuleDockingNode>();
-                    if (node != null)
-                    {
-                        //JUtil.LogMessage(vessel, "InferDockingNode: found a node on {0}", vessel.parts[i].name);
-                        return node;
-                    }
-                }
-            }
-
-            // We did not find a docking node.
-            return null;
-        }
-
-        /// <summary>
-        /// Iterate over the modules in the craft and return all of them that
-        /// implement a ModuleGenerator or ModuleResourceConverter that generates 
-        /// electricity that can also be shut down.
-        /// </summary>
-        /// <param name="vessel"></param>
-        /// <returns></returns>
-        private static System.Collections.Generic.IEnumerable<PartModule> ElectricGenerators(Vessel vessel)
-        {
-            foreach (Part part in vessel.Parts)
-            {
-                foreach (PartModule pm in part.Modules)
-                {
-                    if (pm is ModuleGenerator)
-                    {
-                        ModuleGenerator gen = pm as ModuleGenerator;
-                        if (gen.isAlwaysActive == false)
-                        {
-                            for (int i = 0; i < gen.outputList.Count; ++i)
-                            {
-                                if (gen.outputList[i].name == "ElectricCharge")
-                                {
-                                    yield return pm;
-                                }
-                            }
-                        }
-                    }
-                    else if (pm is ModuleResourceConverter)
-                    {
-                        ModuleResourceConverter gen = pm as ModuleResourceConverter;
-                        if (gen.AlwaysActive == false)
-                        {
-                            ConversionRecipe recipe = gen.Recipe;
-                            for (int i = 0; i < recipe.Outputs.Count; ++i)
-                            {
-                                if (recipe.Outputs[i].ResourceName == "ElectricCharge")
-                                {
-                                    yield return pm;
-                                }
-                            }
-                        }
-                    }
-                }
+                return true;
             }
         }
 
-        /// <summary>
-        /// Iterator to find gimbals on active stages
-        /// </summary>
-        /// <param name="vessel"></param>
-        /// <returns></returns>
-        private static IEnumerable<ModuleGimbal> FindActiveStageGimbals(Vessel vessel)
+        /**
+         * Resets all trim parameters to neutral
+         */
+        public void SetAllTrimNeutral(bool state)
         {
-            foreach (Part thatPart in vessel.parts)
-            {
-                // MOARdV: I'm not sure inverseStage is ever > CurrentStage,
-                // but there's no harm in >= vs ==.
-                if (thatPart.inverseStage >= Staging.CurrentStage)
-                {
-                    foreach (PartModule pm in thatPart.Modules)
-                    {
-                        if (pm is ModuleGimbal)
-                        {
-                            yield return pm as ModuleGimbal;
-                        }
-                    }
-                }
-            }
+            FlightInputHandler.state.ResetTrim();
+        }
+
+        /**
+         * Resets pitch trim to neutral
+         */
+        public void SetPitchTrimNeutral(bool state)
+        {
+            FlightInputHandler.state.pitchTrim = 0.0f;
+        }
+
+        /**
+         * Sets pitch trim to the desired percent (-100 to 100)
+         */
+        public void SetPitchTrim(double trimPercent)
+        {
+            FlightInputHandler.state.pitchTrim = (float)(trimPercent.Clamp(-100.0, 100.0)) / 100.0f;
+        }
+
+        /**
+         * Resets roll trim to neutral
+         */
+        public void SetRollTrimNeutral(bool state)
+        {
+            FlightInputHandler.state.rollTrim = 0.0f;
+        }
+
+        /**
+         * Sets roll trim to the desired percent (-100 to 100)
+         */
+        public void SetRollTrim(double trimPercent)
+        {
+            FlightInputHandler.state.rollTrim = (float)(trimPercent.Clamp(-100.0, 100.0)) / 100.0f;
+        }
+
+        /**
+         * Resets yaw trim to neutral
+         */
+        public void SetYawTrimNeutral(bool state)
+        {
+            FlightInputHandler.state.yawTrim = 0.0f;
+        }
+
+        /**
+         * Sets yaw trim to the desired percent (-100 to 100)
+         */
+        public void SetYawTrim(double trimPercent)
+        {
+            FlightInputHandler.state.yawTrim = (float)(trimPercent.Clamp(-100.0, 100.0)) / 100.0f;
         }
     }
 }

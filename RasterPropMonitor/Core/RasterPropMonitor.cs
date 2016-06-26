@@ -67,6 +67,8 @@ namespace JSI
         public bool needsElectricCharge = true;
         [KSPField]
         public string resourceName = "SYSR_ELECTRICCHARGE";
+        private bool resourceDepleted = false; // Managed by rpmComp callback
+        private Action<bool> del;
         [KSPField]
         public string defaultFontTint = string.Empty;
         public Color defaultFontTintValue = Color.white;
@@ -92,20 +94,13 @@ namespace JSI
         private bool textRefreshRequired;
         private readonly List<MonitorPage> pages = new List<MonitorPage>();
         private MonitorPage activePage;
-        private RasterPropMonitorComputer rpmComp;
         private string persistentVarName;
-        private string screenBuffer;
         private FXGroup audioOutput;
-        private float electricChargeReserve;
         public Texture2D noSignalTexture;
         private Material screenMat;
         private bool startupComplete;
         private string fontDefinitionString = @" !""#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~Δ☊¡¢£¤¥¦§¨©ª«¬☋®¯°±²³´µ¶·¸¹º»¼½¾¿";
-
-        private int loopsWithoutInitCounter = 0;
-        private bool startupFailed = false;
-
-        private bool ourPodIsTransparent = false;
+        private RasterPropMonitorComputer rpmComp;
 
         private static Texture2D LoadFont(object caller, InternalProp thisProp, string location)
         {
@@ -119,7 +114,7 @@ namespace JSI
                 }
                 else
                 {
-                    font = (Texture2D)thisProp.FindModelTransform(location).renderer.material.mainTexture;
+                    font = (Texture2D)thisProp.FindModelTransform(location).GetComponent<Renderer>().material.mainTexture;
                     JUtil.LogMessage(caller, "Loading font texture from a transform named \"{0}\"", location);
                 }
             }
@@ -142,11 +137,11 @@ namespace JSI
 
             try
             {
-                // Install the calculator module.
-                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                comp.UpdateDataRefreshRate(refreshDataRate);
+                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
+                JUtil.LogMessage(this, "Attaching monitor {2}-{1} to {0}", rpmComp.RPMCid, internalProp.propID, internalProp.internalModel.internalName);
 
-                rpmComp = RasterPropMonitorComputer.Instantiate(internalProp);
+                // Install the calculator module.
+                rpmComp.UpdateDataRefreshRate(refreshDataRate);
 
                 // Loading the font...
                 List<Texture2D> fontTexture = new List<Texture2D>();
@@ -171,7 +166,7 @@ namespace JSI
                 // Now that is done, proceed to setting up the screen.
 
                 screenTexture = new RenderTexture(screenPixelWidth, screenPixelHeight, 24, RenderTextureFormat.ARGB32);
-                screenMat = internalProp.FindModelTransform(screenTransform).renderer.material;
+                screenMat = internalProp.FindModelTransform(screenTransform).GetComponent<Renderer>().material;
                 foreach (string layerID in textureLayerID.Split())
                 {
                     screenMat.SetTexture(layerID.Trim(), screenTexture);
@@ -183,7 +178,7 @@ namespace JSI
                 }
 
                 // Create camera instance...
-                cameraStructure = new FlyingCamera(part, screenTexture, cameraAspect);
+                cameraStructure = new FlyingCamera(part, cameraAspect);
 
                 // The neat trick. IConfigNode doesn't work. No amount of kicking got it to work.
                 // Well, we don't need it. GameDatabase, gimme config nodes for all props!
@@ -235,7 +230,7 @@ namespace JSI
 
                 // Load our state from storage...
                 persistentVarName = "activePage" + internalProp.propID;
-                int activePageID = rpmComp.GetVar(persistentVarName, pages.Count);
+                int activePageID = rpmComp.GetPersistentVariable(persistentVarName, pages.Count, false).MassageToInt();
                 if (activePageID < pages.Count)
                 {
                     activePage = pages[activePageID];
@@ -257,8 +252,11 @@ namespace JSI
 
                 audioOutput = JUtil.SetupIVASound(internalProp, buttonClickSound, buttonClickVolume, false);
 
-                // One last thing to make sure of: If our pod is transparent, we're always active.
-                ourPodIsTransparent = JUtil.IsPodTransparent(part);
+                if (needsElectricCharge)
+                {
+                    del = (Action<bool>)Delegate.CreateDelegate(typeof(Action<bool>), this, "ResourceDepletedCallback");
+                    rpmComp.RegisterResourceCallback(resourceName, del);
+                }
 
                 // And if the try block never completed, startupComplete will never be true.
                 startupComplete = true;
@@ -266,7 +264,6 @@ namespace JSI
             catch
             {
                 JUtil.AnnoyUser(this);
-                startupFailed = true;
                 // We can also disable ourselves, that should help.
                 enabled = false;
                 // And now that we notified the user that config is borked, we rethrow the exception so that
@@ -292,7 +289,10 @@ namespace JSI
             {
                 Destroy(screenMat);
             }
-            rpmComp = null;
+            if (del != null)
+            {
+                rpmComp.UnregisterResourceCallback(resourceName, del);
+            }
         }
 
         private static void PlayClickSound(FXGroup audioOutput)
@@ -305,7 +305,7 @@ namespace JSI
 
         public void GlobalButtonClick(int buttonID)
         {
-            if (needsElectricCharge && electricChargeReserve < 0.01f)
+            if (resourceDepleted)
             {
                 return;
             }
@@ -341,7 +341,7 @@ namespace JSI
 
         public void PageButtonClick(MonitorPage triggeredPage)
         {
-            if (needsElectricCharge && electricChargeReserve < 0.01f)
+            if (resourceDepleted)
             {
                 return;
             }
@@ -353,7 +353,7 @@ namespace JSI
                 activePage.Active(false);
                 activePage = triggeredPage;
                 activePage.Active(true);
-                rpmComp.SetVar(persistentVarName, activePage.pageNumber);
+                rpmComp.SetPersistentVariable(persistentVarName, activePage.pageNumber, false);
                 refreshDrawCountdown = refreshTextCountdown = 0;
                 firstRenderComplete = false;
                 PlayClickSound(audioOutput);
@@ -397,7 +397,7 @@ namespace JSI
             screenTexture.DiscardContents();
             RenderTexture.active = screenTexture;
 
-            if (needsElectricCharge && electricChargeReserve < 0.01f)
+            if (resourceDepleted)
             {
                 // If we're out of electric charge, we're drawing a blank screen.
                 GL.Clear(true, true, emptyColorValue);
@@ -415,7 +415,7 @@ namespace JSI
 
             if (!string.IsNullOrEmpty(activePage.Text))
             {
-                textRenderer.Render(screenTexture, screenBuffer, activePage);
+                textRenderer.Render(screenTexture, activePage);
             }
 
             activePage.RenderOverlay(screenTexture);
@@ -426,27 +426,7 @@ namespace JSI
 
         private void FillScreenBuffer()
         {
-            RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-            StringBuilder bf = new StringBuilder();
-            string[] linesArray = activePage.Text.Split(JUtil.LineSeparator, StringSplitOptions.None);
-            for (int i = 0; i < linesArray.Length; i++)
-            {
-                bf.AppendLine(StringProcessor.ProcessString(linesArray[i], comp, internalProp.propID));
-            }
-            textRefreshRequired = false;
-            screenBuffer = bf.ToString();
-
-            // This is where we request electric charge reserve. And if we don't have any, well... :)
-            CheckForElectricCharge();
-        }
-
-        private void CheckForElectricCharge()
-        {
-            if (needsElectricCharge)
-            {
-                RPMVesselComputer comp = RPMVesselComputer.Instance(vessel);
-                electricChargeReserve = comp.ProcessVariable(resourceName).MassageToFloat();
-            }
+            activePage.UpdateText(rpmComp);
         }
 
         public override void OnUpdate()
@@ -462,15 +442,10 @@ namespace JSI
             // particularly when docking, so we can't use it to detect being broken by a third party plugin.
             if (!startupComplete)
             {
-                loopsWithoutInitCounter++;
                 return;
             }
 
-            // If we were spawned while in editor, we need to blank the screen out and halt.
-            // So we switch to oneshot mode.
-            //oneshot |= HighLogic.LoadedSceneIsEditor;
-
-            if (!ourPodIsTransparent && !JUtil.UserIsInPod(part))
+            if (!JUtil.RasterPropMonitorShouldUpdate(vessel) && !JUtil.UserIsInPod(part))
             {
                 return;
             }
@@ -506,11 +481,11 @@ namespace JSI
                     FillScreenBuffer();
                     RenderScreen();
                     firstRenderComplete = true;
+                    textRefreshRequired = false;
                 }
                 else
                 {
-                    CheckForElectricCharge();
-                    if (needsElectricCharge && electricChargeReserve < 0.01f)
+                    if (!resourceDepleted)
                     {
                         RenderScreen();
                     }
@@ -521,8 +496,12 @@ namespace JSI
                 if (textRefreshRequired)
                 {
                     FillScreenBuffer();
+                    textRefreshRequired = false;
                 }
-                RenderScreen();
+                if (!resourceDepleted)
+                {
+                    RenderScreen();
+                }
                 firstRenderComplete = true;
             }
 
@@ -548,22 +527,33 @@ namespace JSI
             firstRenderComplete &= pause;
         }
 
-        public void LateUpdate()
+        //public void LateUpdate()
+        //{
+
+        //    if (HighLogic.LoadedSceneIsEditor)
+        //        return;
+
+        //    // If we reached a set number of update loops and startup still didn't happen, we're getting killed by a third party module.
+        //    // We might STILL be getting killed by a third party module even during update, but I hope this will catch at least some cases.
+        //    if (!startupFailed && loopsWithoutInitCounter > 600)
+        //    {
+        //        ScreenMessages.PostScreenMessage("RasterPropMonitor cannot complete initialization.", 120, ScreenMessageStyle.UPPER_CENTER);
+        //        ScreenMessages.PostScreenMessage("The cause is usually some OTHER broken mod.", 120, ScreenMessageStyle.UPPER_CENTER);
+        //        loopsWithoutInitCounter = 0;
+        //    }
+        //}
+
+        /// <summary>
+        /// This little callback allows RasterPropMonitorComputer to notify
+        /// this module when its required resource has gone above or below the
+        /// arbitrary and hard-coded threshold of 0.01, so that each monitor is
+        /// not forced to query every update "How much power is there?".
+        /// </summary>
+        /// <param name="newValue"></param>
+        void ResourceDepletedCallback(bool newValue)
         {
-
-            if (HighLogic.LoadedSceneIsEditor)
-                return;
-
-            // If we reached a set number of update loops and startup still didn't happen, we're getting killed by a third party module.
-            // We might STILL be getting killed by a third party module even during update, but I hope this will catch at least some cases.
-            if (!startupFailed && loopsWithoutInitCounter > 600)
-            {
-                ScreenMessages.PostScreenMessage("RasterPropMonitor cannot complete initialization.", 120, ScreenMessageStyle.UPPER_CENTER);
-                ScreenMessages.PostScreenMessage("The cause is usually some OTHER broken mod.", 120, ScreenMessageStyle.UPPER_CENTER);
-                loopsWithoutInitCounter = 0;
-            }
+            resourceDepleted = newValue;
         }
-
     }
 }
 

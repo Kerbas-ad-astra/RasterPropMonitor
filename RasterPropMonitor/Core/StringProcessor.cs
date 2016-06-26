@@ -22,11 +22,83 @@ using System;
 
 namespace JSI
 {
+    public class StringProcessorFormatter
+    {
+        // The formatString or plain text (if usesComp is false).
+        public readonly string formatString;
+        // An array of source variables
+        public readonly VariableOrNumber[] sourceVariables;
+        // An array holding evaluants
+        public readonly object[] sourceValues;
+
+        // Indicates that the SPF uses RPMVesselComputer to process variables
+        public readonly bool usesComp;
+
+        // TODO: Add support for multi-line processed support.
+        public StringProcessorFormatter(string input, RasterPropMonitorComputer rpmComp)
+        {
+            if(string.IsNullOrEmpty(input))
+            {
+                formatString = "";
+                usesComp = false;
+            }
+            else if (input.IndexOf(JUtil.VariableListSeparator[0], StringComparison.Ordinal) >= 0)
+            {
+                string[] tokens = input.Split(JUtil.VariableListSeparator, StringSplitOptions.RemoveEmptyEntries);
+                if (tokens.Length != 2)
+                {
+                    throw new ArgumentException(string.Format("Invalid format string: {0}", input));
+                }
+                else
+                {
+                    string[] sourceVarStrings = tokens[1].Split(JUtil.VariableSeparator, StringSplitOptions.RemoveEmptyEntries);
+                    sourceVariables = new VariableOrNumber[sourceVarStrings.Length];
+                    for (int i = 0; i < sourceVarStrings.Length; ++i )
+                    {
+                        sourceVariables[i] = rpmComp.InstantiateVariableOrNumber(sourceVarStrings[i]);
+                    }
+                    sourceValues = new object[sourceVariables.Length];
+                    formatString = tokens[0].TrimEnd();
+
+                    usesComp = true;
+                }
+            }
+            else
+            {
+                formatString = input.TrimEnd();
+                usesComp = false;
+            }
+        }
+    }
+
     public static class StringProcessor
     {
         private static readonly SIFormatProvider fp = new SIFormatProvider();
 
-        public static string ProcessString(string input, RPMVesselComputer comp, int propID = -1)
+        public static string ProcessString(StringProcessorFormatter formatter, RasterPropMonitorComputer rpmComp)
+        {
+            if (formatter.usesComp)
+            {
+                try
+                {
+                    RPMVesselComputer comp = RPMVesselComputer.Instance(rpmComp.vessel);
+                    for (int i = 0; i < formatter.sourceVariables.Length; ++i)
+                    {
+                        formatter.sourceValues[i] = formatter.sourceVariables[i].Get();
+                    }
+
+                    return string.Format(fp, formatter.formatString, formatter.sourceValues);
+                }
+                catch(Exception e)
+                {
+                    JUtil.LogErrorMessage(formatter, "Exception trapped in ProcessString for {1}: {0}", e, formatter.formatString);
+                }
+            }
+
+            return formatter.formatString;
+        }
+
+        public static string ProcessString(string input, RasterPropMonitorComputer rpmComp)
         {
             try
             {
@@ -39,23 +111,25 @@ namespace JSI
                     }
                     else
                     {
+                        RPMVesselComputer comp = RPMVesselComputer.Instance(rpmComp.vessel);
                         string[] vars = tokens[1].Split(JUtil.VariableSeparator, StringSplitOptions.RemoveEmptyEntries);
 
                         var variables = new object[vars.Length];
                         for (int i = 0; i < vars.Length; i++)
                         {
-                            variables[i] = comp.ProcessVariable(vars[i], propID);
+                            variables[i] = rpmComp.ProcessVariable(vars[i].Trim(), comp);
                         }
                         string output = string.Format(fp, tokens[0], variables);
                         return output.TrimEnd();
                     }
                 }
+
             }
             catch (Exception e)
             {
-                JUtil.LogMessage(comp, "Bad format on string {0}", input);
-                throw e;
+                JUtil.LogErrorMessage(rpmComp, "Bad format on string {0}: {1}", input, e);
             }
+
             return input.TrimEnd();
         }
     }
