@@ -65,7 +65,7 @@ namespace JSI
                 rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
 
                 textObjTransform = internalProp.FindModelTransform(labelTransform);
-                textObj = InternalComponents.Instance.CreateText(fontName, fontSize, textObjTransform, string.Empty);
+                textObj = InternalComponents.Instance.CreateText(fontName, fontSize * 15.5f, textObjTransform, string.Empty);
                 activeLabel = 0;
 
                 SmarterButton.CreateButton(internalProp, switchTransform, Click);
@@ -127,11 +127,11 @@ namespace JSI
                         // because there may be formatting stuff, but if
                         // oneShot is true, we already know that this is a
                         // constant string with no formatting.
-                        textObj.text.Text = labelsEx[activeLabel].label.formatString;
+                        textObj.text.text = labelsEx[activeLabel].label.formatString;
                     }
                     else
                     {
-                        textObj.text.Text = "";
+                        textObj.text.text = "";
                     }
                 }
 
@@ -183,7 +183,7 @@ namespace JSI
         {
             if (JUtil.RasterPropMonitorShouldUpdate(vessel) && UpdateCheck())
             {
-                textObj.text.Text = StringProcessor.ProcessString(labelsEx[activeLabel].label, rpmComp);
+                textObj.text.text = StringProcessor.ProcessString(labelsEx[activeLabel].label, rpmComp);
             }
         }
 
@@ -203,7 +203,7 @@ namespace JSI
 
             if (labelsEx[activeLabel].hasText)
             {
-                textObj.text.Text = StringProcessor.ProcessString(labelsEx[activeLabel].label, rpmComp);
+                textObj.text.text = StringProcessor.ProcessString(labelsEx[activeLabel].label, rpmComp);
             }
 
             // Force an update.

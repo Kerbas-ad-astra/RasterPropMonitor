@@ -68,7 +68,7 @@ namespace JSI
                 rpmComp = RasterPropMonitorComputer.Instantiate(internalProp, true);
 
                 Transform textObjTransform = internalProp.FindModelTransform(transformName);
-                textObj = InternalComponents.Instance.CreateText("Arial", fontSize, textObjTransform, string.Empty);
+                textObj = InternalComponents.Instance.CreateText("Arial", fontSize * 15.5f, textObjTransform, string.Empty);
                 // Force oneshot if there's no variables:
                 oneshot |= !labelText.Contains("$&$");
                 string sourceString = labelText.UnMangleConfigText();
@@ -152,15 +152,15 @@ namespace JSI
 
             if (value < 0.0f)
             {
-                textObj.text.Color = negativeColorValue;
+                textObj.text.color = negativeColorValue;
             }
             else if (value > 0.0f)
             {
-                textObj.text.Color = positiveColorValue;
+                textObj.text.color = positiveColorValue;
             }
             else
             {
-                textObj.text.Color = zeroColorValue;
+                textObj.text.color = zeroColorValue;
             }
         }
 
@@ -191,7 +191,7 @@ namespace JSI
 
             if (JUtil.RasterPropMonitorShouldUpdate(vessel) && UpdateCheck())
             {
-                textObj.text.Text = StringProcessor.ProcessString(spf, rpmComp);
+                textObj.text.text = StringProcessor.ProcessString(spf, rpmComp);
                 oneshotComplete = true;
             }
         }
